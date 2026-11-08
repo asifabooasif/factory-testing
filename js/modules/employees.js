@@ -1,5 +1,6 @@
 /* Employees — 3 pay categories with salaryHistory tracking.
    Every MonthlySalaried employee's salary change is auto-recorded.
+   FIX: Wage workers can have a 0/blank daily rate if they are purely piece-rate.
 */
 (E => {
   const n = E.N.find(x => x.id === 'employees');
@@ -20,7 +21,7 @@
   };
   const RATE_UNIT = { Wage: '/day', DailySalaried: '/day', MonthlySalaried: '/month' };
   const RATE_LABEL = {
-    Wage: 'Daily rate (Rs) *',
+    Wage: 'Daily rate (Rs) — leave 0 if purely piece-rate',
     DailySalaried: 'Daily salary (Rs) *',
     MonthlySalaried: 'Monthly salary (Rs) *'
   };
@@ -82,7 +83,7 @@
             <div class="muted" style="font-size:11px;margin-top:3px">${paidIn(p)}</div>
             ${histCount > 1 ? `<div class="muted" style="font-size:10px">${histCount} salary revisions</div>` : ''}
           </td>
-          <td class="r">${E.m(p.amount)}${RATE_UNIT[cat]}</td>
+          <td class="r">${p.amount ? E.m(p.amount) + RATE_UNIT[cat] : '<span class="muted">Piece only</span>'}</td>
           <td class="r">${p.allow ? E.m(p.allow) : '—'}</td>
           <td>${p.piece ? 'Yes' : '—'}</td>
           <td>${p.epf ? 'Yes' : '—'}</td>
@@ -152,7 +153,7 @@
           </select>
         </div>
         <div class="f"><span id="e_rate_lbl">${RATE_LABEL[cat]}</span>
-          <input id="e_amt" type="number" step="0.01" value="${p ? p.amount / 100 : ''}">
+          <input id="e_amt" type="number" step="0.01" value="${p ? p.amount / 100 : ''}" placeholder="${isW ? '0 for purely piece-rate' : ''}">
         </div>
       </div>
       <div class="f" id="e_allow_grp" style="${isMS ? '' : 'display:none'}">
@@ -196,8 +197,8 @@
   function formHint(cat) {
     if (cat === 'Wage') return `
       <b>Wage Worker</b><br>
-      • Attendance days × daily rate paid in <b>Wage runs</b><br>
-      • Piece work (if any) paid in the same <b>Wage run</b><br>
+      • Set <b>Daily rate to 0</b> if they are purely piece-rate (no attendance pay)<br>
+      • Piece work paid in <b>Wage runs</b><br>
       • No advances — wage workers do not take advances`;
     if (cat === 'DailySalaried') return `
       <b>Daily Salaried</b><br>
@@ -216,7 +217,9 @@
     const cat = E.val('e_type');
     const isMS = cat === 'MonthlySalaried';
     const isSal = cat !== 'Wage';
+    const isW = cat === 'Wage';
     if (E.$('e_rate_lbl')) E.$('e_rate_lbl').textContent = RATE_LABEL[cat] || 'Rate (Rs) *';
+    if (E.$('e_amt')) E.$('e_amt').placeholder = isW ? '0 for purely piece-rate' : '';
     if (E.$('e_allow_grp')) E.$('e_allow_grp').style.display = isMS ? '' : 'none';
     if (E.$('e_inst_grp')) E.$('e_inst_grp').style.display = isSal ? '' : 'none';
     if (E.$('e_hint')) E.$('e_hint').innerHTML = formHint(cat);
@@ -235,7 +238,7 @@
     const rate = E.c(E.val('e_amt'));
 
     if (!name) return E.toast('Name required', 'error');
-    if (!rate) return E.toast('Enter the ' + (cat === 'MonthlySalaried' ? 'monthly salary' : 'daily rate'), 'error');
+    if (!rate && cat !== 'Wage') return E.toast('Enter the ' + (cat === 'MonthlySalaried' ? 'monthly salary' : 'daily rate'), 'error');
     if (!['Wage', 'DailySalaried', 'MonthlySalaried'].includes(cat))
       return E.toast('Invalid pay type', 'error');
     if (nic && E.rows('employees').some(p => p.id !== id && p.nic === nic))
