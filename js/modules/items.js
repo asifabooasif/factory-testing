@@ -116,7 +116,11 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
     const fgI = E.val('i_cat') === 'Finished Good';
     document.querySelectorAll('.i-fg').forEach(x => x.style.display = fgI ? '' : 'none');
     document.querySelectorAll('.i-nf').forEach(x => x.style.display = fgI ? 'none' : '');
-    if (fgI && E.$('i_unit')) E.$('i_unit').value = 'Pack';
+    if (fgI) {
+      if (E.$('i_unit')) E.$('i_unit').value = 'Pack';
+    } else {
+      if (E.$('i_unit') && E.$('i_unit').value === 'Pack') E.$('i_unit').value = 'Pcs';
+    }
   }
   function consToggle() { const fgI = E.val('i_cat') === 'Finished Good', g = E.$('i_cons_grp'); if (g) g.style.display = fgI ? 'none' : ''; }
   function consModeToggle() { const m = E.val('i_cons_m'), g = E.$('i_bottle_grp'); if (!g) return; g.style.display = (m === 'bottle') ? '' : 'none'; }
@@ -125,27 +129,36 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
     const it = id ? E.D.items.find(x => x.id === id) : null, fgI = !it || it.cat === 'Finished Good';
     const cons = it && it.consumable, consMode = (it && it.consumableMode) || 'bom';
     const curPrice = it && it.price ? (it.price / 100) : '';
+    
     E.modal(it ? 'Edit Item' : 'New Item', `
       <div class="g2">
-        <div class="f">Article No *<input id="i_art" value="${E.esc(it && it.art)}" ${it ? 'disabled' : ''} placeholder="F001"></div>
+        <div class="f">Article No *<input id="i_art" value="${E.esc(it && it.art)}" ${it ? 'disabled' : ''} placeholder="e.g. F001 or EVA-01"></div>
         <div class="f">Category *<select id="i_cat" ${it && used(it.id) ? 'disabled' : ''}>${CATS.map(c => `<option ${(it ? it.cat : 'Finished Good') === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
       </div>
+      
       <div class="g2 i-fg" style="${fgI ? '' : 'display:none'}">
-        <div class="f">Category *<select id="i_sub">${E.fgCats().concat(it && it.sub && !E.fgCats().includes(it.sub) ? [it.sub] : []).map(c => `<option ${it && it.sub === c ? 'selected' : ''}>${E.esc(c)}</option>`).join('')}</select></div>
+        <div class="f">Finished Goods Group *<select id="i_sub">${E.fgCats().concat(it && it.sub && !E.fgCats().includes(it.sub) ? [it.sub] : []).map(c => `<option ${it && it.sub === c ? 'selected' : ''}>${E.esc(c)}</option>`).join('')}</select></div>
         <div class="f">Size run (pairs in ONE pack) *<input id="i_run" value="${E.esc(it && it.sizeRun)}" placeholder="36-41"><small class="muted">Try 36-41 → 6 pairs, or 6,7,7,8,8,9</small></div>
       </div>
+
       <div class="f">Item Name *<input id="i_name" value="${E.esc(it && it.name)}"></div>
+      
       <div class="g2">
-        <div class="f">Unit<select id="i_unit">${UNITS.map(u => `<option ${((it ? it.unit : 'Pack') === u) ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
-        <div class="f"><span class="i-fg" style="${fgI ? '' : 'display:none'}">Pairs in one pack</span><span class="i-nf" style="${fgI ? 'display:none' : ''}">Pairs/units per pack (optional)</span><input id="i_pack" type="number" value="${it ? it.pack : E.setting('packSize')}"></div>
+        <div class="f">Unit<select id="i_unit">${UNITS.map(u => `<option ${((it ? it.unit : (fgI ? 'Pack' : 'Pcs')) === u) ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
+        <div class="f i-fg" style="${fgI ? '' : 'display:none'}">Pairs in one pack<input id="i_pack" type="number" value="${it && it.pack ? it.pack : E.setting('packSize')}"></div>
       </div>
+
       <div class="f i-fg" style="${fgI ? '' : 'display:none'}">Selling price PER PAIR (Rs)<input id="i_price" type="number" step="0.01" value="${curPrice}"><small class="muted">Cost per pack = price/pair × pairs/pack</small></div>
+      
       <div class="f i-nf" style="${fgI ? 'display:none' : ''}">Purchase price per unit (Rs) *<input id="i_buy" type="number" step="0.01" value="${it && (it.buyPrice || it.price) ? ((it.buyPrice || it.price) / 100).toFixed(2) : ''}"></div>
+      
       <div class="f">Reorder level<input id="i_min" type="number" value="${it ? (it.min || '') : ''}"></div>
+      
       <div class="g2 i-nf" style="${fgI ? 'display:none' : ''}">
         <div class="f">Preferred supplier<select id="i_sup"><option value="">— none —</option>${E.rows('parties').filter(p => p.active && p.type !== 'Customer').map(p => `<option value="${p.id}" ${it && it.supId === p.id ? 'selected' : ''}>${E.esc(p.name)}</option>`).join('')}</select></div>
         <div class="f">Spec / notes<input id="i_spec" value="${E.esc(it && it.spec)}"></div>
       </div>
+
       <div class="i-nf" style="${fgI ? 'display:none' : ''}">
         <div class="card" style="background:var(--acs);border:1px solid var(--bd);margin:12px 0;padding:14px">
           <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-weight:600">
@@ -167,12 +180,16 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
           </div>
         </div>
       </div>
+
       ${it ? '<p class="muted">Add colours from the Colours button on the list.</p>' : `
         <div class="f i-fg" style="${fgI ? '' : 'display:none'}">Colours (comma separated) — one barcode each<input id="i_cols" placeholder="Black, Brown, Navy"></div>
         <div class="g2 i-nf" style="${fgI ? 'display:none' : ''}"><div class="f">Sizes<input id="i_sizes" placeholder="6,7,8,9"></div><div class="f">Colours<input id="i_cols2" placeholder="Black,Brown"></div></div>
       `}
     `, `<button class="btn" data-a="close">Cancel</button><button class="btn p" data-a="saveItem" data-id="${id || ''}">Save</button>`, 1);
-    setTimeout(() => { const c = E.$('i_cons'); if (c) c.onchange = () => { const g = E.$('i_cons_grp'); if (g) g.style.display = c.checked ? '' : 'none'; }; }, 50);
+    setTimeout(() => { 
+      const c = E.$('i_cons'); 
+      if (c) c.onchange = () => { const g = E.$('i_cons_grp'); if (g) g.style.display = c.checked ? '' : 'none'; }; 
+    }, 50);
   };
   E.A.newItem = () => form();
   E.A.editItem = id => form(id);
@@ -184,15 +201,18 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
     if (!id && !art) return E.toast('Article No required', 'error');
     if (!name) return E.toast('Name required', 'error');
     if (!id && E.rows('items').some(i => i.art === art)) return E.toast('Article No exists', 'error');
+    
     const run = fgI ? E.expandSizes(E.val('i_run')) : [];
     if (fgI && !run.length) return E.toast('Enter size run (e.g., 36-41)', 'error');
     if (!fgI && !(E.c(E.val('i_buy')) > 0)) return E.toast('Enter purchase price', 'error');
+    
     const it = id ? E.D.items.find(x => x.id === id) : { art, active: true };
     const b = id ? JSON.parse(JSON.stringify(it)) : null;
     const cons = !fgI && E.$('i_cons') && E.$('i_cons').checked;
+    
     Object.assign(it, {
       name, cat, unit: fgI ? 'Pack' : E.val('i_unit'),
-      pack: fgI ? run.length : Math.max(0, parseInt(E.val('i_pack')) || 0),
+      pack: fgI ? run.length : 0,
       sizeRun: fgI ? run.join(',') : '', sub: fgI ? E.val('i_sub') : '',
       price: fgI ? E.c(E.val('i_price')) : 0,
       buyPrice: fgI ? (it.buyPrice || 0) : E.c(E.val('i_buy')),
@@ -202,6 +222,7 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
       bottleSize: cons && E.val('i_cons_m') === 'bottle' ? (parseFloat(E.val('i_bsize')) || 0) : 0,
       bottleUnit: cons && E.val('i_cons_m') === 'bottle' ? (E.val('i_bunit') || 'g') : ''
     });
+    
     await E.save('items', it, b);
     if (!id) {
       const made = fgI ? await genPacks(it, list(E.val('i_cols'))) : await gen(it, list(E.val('i_sizes')), list(E.val('i_cols2')));
@@ -209,6 +230,7 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
     } else E.toast('Item updated', 'success');
     E.closeM(); E.go();
   };
+  
   E.A.delItem = async id => {
     const it = E.D.items.find(x => x.id === id);
     if (used(id)) { const b = JSON.parse(JSON.stringify(it)); it.active = !it.active; await E.save('items', it, b); }
