@@ -1,5 +1,5 @@
-/* Lanka Slipper ERP — Service Worker (v43) */
-const V = 'lanka-erp-v43';
+/* Lanka Slipper ERP — Service Worker (v44) */
+const V = 'lanka-erp-v44';
 const CORE = [
   "./", "index.html", "manifest.json", "icons/icon.svg", "css/theme.css", "js/app.js",
   "js/core/audit.js", "js/core/config.js", "js/core/db.js", "js/core/factory.js",
