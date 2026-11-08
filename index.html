@@ -32,7 +32,9 @@
   <div id="mw"></div>
   <div id="ts"></div>
 
-  <!-- CORE ENGINES -->
+  <!-- ═══════════════════════════════════════════════════════════════
+       CORE ENGINES (13)
+       ═══════════════════════════════════════════════════════════════ -->
   <script src="js/core/config.js"></script>
   <script src="js/core/money.js"></script>
   <script src="js/core/utils.js"></script>
@@ -47,7 +49,9 @@
   <script src="js/core/sync.js"></script>
   <script src="js/core/router.js"></script>
 
-  <!-- MODULES -->
+  <!-- ═══════════════════════════════════════════════════════════════
+       FEATURE MODULES
+       ═══════════════════════════════════════════════════════════════ -->
   <script src="js/modules/dashboard.js"></script>
   <script src="js/modules/journal.js"></script>
   <script src="js/modules/items.js"></script>
@@ -59,6 +63,14 @@
   <script src="js/modules/petty.js"></script>
   <script src="js/modules/sales.js"></script>
   <script src="js/modules/payroll.js"></script>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       STAFF LOANS (NEW)
+       Loads right after payroll.js so its menu item sits between
+       "Employee Ledger" and "Salary & Advance Register"
+       ═══════════════════════════════════════════════════════════════ -->
+  <script src="js/modules/staffloans.js"></script>
+
   <script src="js/modules/banking.js"></script>
   <script src="js/modules/reports.js"></script>
   <script src="js/modules/cloud.js"></script>
@@ -90,10 +102,10 @@
   <script src="js/modules/closing.js"></script>
   <script src="js/modules/guide.js"></script>
 
-  <!-- AI ASSISTANT PRO (single merged module — replaces ai-agent.js and ai-coach.js) -->
+  <!-- AI Assistant Pro -->
   <script src="js/modules/ai-assistant.js"></script>
 
-  <!-- BOOTSTRAP -->
+  <!-- Bootstrap -->
   <script src="js/app.js"></script>
 
 </body>
