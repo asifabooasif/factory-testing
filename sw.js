@@ -1,5 +1,5 @@
-/* Lanka Slipper ERP — Service Worker (v42) */
-const V = 'lanka-erp-v42';
+/* Lanka Slipper ERP — Service Worker (v43) */
+const V = 'lanka-erp-v43';
 const CORE = [
   "./", "index.html", "manifest.json", "icons/icon.svg", "css/theme.css", "js/app.js",
   "js/core/audit.js", "js/core/config.js", "js/core/db.js", "js/core/factory.js",
@@ -16,9 +16,9 @@ const CORE = [
   "js/modules/returns.js", "js/modules/sales.js", "js/modules/settings.js", "js/modules/production.js",
   "js/modules/expenses.js", "js/modules/matstock.js", "js/modules/setup.js", "js/modules/closing.js",
   "js/modules/guide.js", "js/modules/staffloans.js", "js/modules/advances-fix.js",
-  "js/modules/daily-hub.js", "js/modules/ai-assistant.js",
   "js/modules/workingdays.js", "js/modules/fixedexpenses.js",
-  "js/modules/dailyallocation.js", "js/modules/reconciliation.js"
+  "js/modules/dailyallocation.js", "js/modules/reconciliation.js",
+  "js/modules/daily-hub.js", "js/modules/ai-assistant.js"
 ];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== V).map(x => caches.delete(x)))).then(() => clients.claim())); });
