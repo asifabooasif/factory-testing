@@ -1,7 +1,8 @@
-/* PART 2 (v3) — Items with per-pair pricing + mixed BOM units.
+/* PART 2 (v4) — Items with per-pair pricing + mixed BOM units + BULK BOM COPY.
    ─ price stored as cents PER PAIR
    ─ sizeRun count = pairs per pack
    ─ BOM qty has perUnit: 'pair' | 'pack'
+   ─ NEW: Bulk copy BOM to multiple articles at once
 */
 (E => {
   const n = E.N.find(x => x.id === 'items'); if (n) n.soon = 0;
@@ -28,8 +29,7 @@
       let sku = it.art + '-' + c.toUpperCase().replace(/\s+/g, ''), k = 2;
       while (E.rows('variants').some(v => v.sku === sku)) sku = sku.split('#')[0] + '#' + k++;
       const v = await E.save('variants', { itemId: it.id, color: c, size: '', sku, barcode: await ean(), active: true });
-      ex.push(v);
-      made++;
+      ex.push(v); made++;
     }
     return made;
   }
@@ -41,8 +41,7 @@
       let sku = [it.art, c.slice(0, 3).toUpperCase(), s].filter(Boolean).join('-'), k = 2;
       while (E.rows('variants').some(v => v.sku === sku)) sku = sku.split('#')[0] + '#' + k++;
       const v = await E.save('variants', { itemId: it.id, color: c, size: s, sku, barcode: await ean(), active: true });
-      ex.push(v);
-      made++;
+      ex.push(v); made++;
     }
     return made;
   }
@@ -65,6 +64,7 @@
       <thead><tr><th>Article No</th><th>Name</th><th>Category</th><th>Size run (pairs/pack)</th><th>Colours</th><th class="r">Price/pair</th><th>🧪</th><th></th></tr></thead>
       <tbody>${rows.map(i => {
         const fgI = i.cat === 'Finished Good', v = vs(i.id).filter(x => x.active);
+        const hasBom = i.bom && i.bom.length > 0;
         return `<tr style="${i.active ? '' : 'opacity:.5'}">
           <td><b style="font-size:15px">${E.esc(i.art)}</b></td>
           <td>${E.esc(i.name)}</td>
@@ -73,7 +73,7 @@
           <td><button class="btn sm" data-a="vars" data-id="${i.id}">${fgI ? v.length + ' colour' + (v.length === 1 ? '' : 's') : v.length + ' SKUs'}</button> ${fgI ? v.slice(0, 4).map(x => E.esc(x.color || '')).filter(Boolean).join(', ') : ''}</td>
           <td class="r">${fgI ? (i.price ? E.m(i.price) + '<div class="muted">per pair</div>' : '—') : (i.buyPrice ? E.m(i.buyPrice) + '<div class="muted">per ' + E.esc(i.unit) + '</div>' : '<span class="bad">no buy price</span>')}</td>
           <td>${i.consumable ? '<span title="Consumable" style="font-size:16px">🧪</span>' : ''}</td>
-          <td class="r">${fgI ? `<button class="btn sm" data-a="bomM" data-id="${i.id}">BOM</button> ` : ''}<button class="btn sm" data-a="editItem" data-id="${i.id}">Edit</button> <button class="btn sm d" data-a="delItem" data-id="${i.id}">${used(i.id) ? (i.active ? 'Deactivate' : 'Activate') : 'Delete'}</button></td>
+          <td class="r">${fgI ? `<button class="btn sm ${hasBom ? '' : 'p'}" data-a="bomM" data-id="${i.id}">${hasBom ? 'BOM ✓' : 'Add BOM'}</button> ` : ''}<button class="btn sm" data-a="editItem" data-id="${i.id}">Edit</button> <button class="btn sm d" data-a="delItem" data-id="${i.id}">${used(i.id) ? (i.active ? 'Deactivate' : 'Activate') : 'Delete'}</button></td>
         </tr>`;
       }).join('') || '<tr><td colspan="8" class="muted">No items</td></tr>'}</tbody>
     </table></div>`;
@@ -132,8 +132,7 @@
       <div class="i-nf" style="${fgI ? 'display:none' : ''}">
         <div class="card" style="background:var(--acs);border:1px solid var(--bd);margin:12px 0;padding:14px">
           <label style="display:flex;gap:10px;align-items:center;cursor:pointer;font-weight:600">
-            <input type="checkbox" id="i_cons" style="width:auto" ${cons ? 'checked' : ''}>
-            🧪 Track as consumable (glue, thread…)
+            <input type="checkbox" id="i_cons" style="width:auto" ${cons ? 'checked' : ''}> 🧪 Track as consumable (glue, thread…)
           </label>
           <div id="i_cons_grp" style="${cons ? '' : 'display:none'};margin-top:10px">
             <div class="f">Mode<select id="i_cons_m">
@@ -175,18 +174,14 @@
     const b = id ? JSON.parse(JSON.stringify(it)) : null;
     const cons = !fgI && E.$('i_cons') && E.$('i_cons').checked;
     Object.assign(it, {
-      name, cat,
-      unit: fgI ? 'Pack' : E.val('i_unit'),
+      name, cat, unit: fgI ? 'Pack' : E.val('i_unit'),
       pack: fgI ? run.length : Math.max(0, parseInt(E.val('i_pack')) || 0),
-      sizeRun: fgI ? run.join(',') : '',
-      sub: fgI ? E.val('i_sub') : '',
+      sizeRun: fgI ? run.join(',') : '', sub: fgI ? E.val('i_sub') : '',
       price: fgI ? E.c(E.val('i_price')) : 0,
       buyPrice: fgI ? (it.buyPrice || 0) : E.c(E.val('i_buy')),
-      supId: fgI ? '' : E.val('i_sup'),
-      spec: fgI ? '' : E.val('i_spec'),
+      supId: fgI ? '' : E.val('i_sup'), spec: fgI ? '' : E.val('i_spec'),
       min: parseFloat(E.val('i_min')) || 0,
-      consumable: cons,
-      consumableMode: cons ? (E.val('i_cons_m') || 'bom') : '',
+      consumable: cons, consumableMode: cons ? (E.val('i_cons_m') || 'bom') : '',
       bottleSize: cons && E.val('i_cons_m') === 'bottle' ? (parseFloat(E.val('i_bsize')) || 0) : 0,
       bottleUnit: cons && E.val('i_cons_m') === 'bottle' ? (E.val('i_bunit') || 'g') : ''
     });
@@ -197,12 +192,152 @@
     } else E.toast('Item updated', 'success');
     E.closeM(); E.go();
   };
-
   E.A.delItem = async id => {
     const it = E.D.items.find(x => x.id === id);
     if (used(id)) { const b = JSON.parse(JSON.stringify(it)); it.active = !it.active; await E.save('items', it, b); }
     else if (confirm('Delete ' + it.art + '?')) { for (const v of vs(id)) { await E.del('variants', v.id); } await E.del('items', id); }
     E.go();
+  };
+
+  /* ═══════════════════════════════════════════════════════════
+     BOM MANAGEMENT WITH BULK COPY
+     ═══════════════════════════════════════════════════════════ */
+  E.A.bomM = id => {
+    const it = E.D.items.find(x => x.id === id);
+    if (!it) return;
+    const bom = it.bom || [];
+    const materials = E.rows('items').filter(i => i.cat !== 'Finished Good').sort((a, b) => a.art.localeCompare(b.art));
+
+    E.modal('BOM — ' + it.art + ' ' + it.name, `
+      <p class="muted" style="margin-bottom:14px">Define materials for ONE pair or ONE pack. This BOM is shared across all colours of this article.</p>
+      
+      <div class="tw"><table>
+        <thead><tr><th>Material</th><th class="r">Qty</th><th>Per</th><th></th></tr></thead>
+        <tbody id="bom_body">
+          ${bom.length ? bom.map((b, i) => {
+            const mat = E.D.items.find(x => x.id === b.itemId);
+            return `<tr data-bom="${i}">
+              <td><select class="bom-mat" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:8px">
+                <option value="">— select material —</option>
+                ${materials.map(m => `<option value="${m.id}" ${b.itemId === m.id ? 'selected' : ''}>${E.esc(m.art)} — ${E.esc(m.name)}</option>`).join('')}
+              </select></td>
+              <td class="r"><input class="bom-qty" type="number" step="0.0001" value="${b.qty || ''}" style="width:80px;padding:6px;text-align:right;border:1px solid var(--bd);border-radius:8px"></td>
+              <td><select class="bom-per" style="padding:6px;border:1px solid var(--bd);border-radius:8px">
+                <option value="pair" ${(b.perUnit || 'pair') === 'pair' ? 'selected' : ''}>per PAIR</option>
+                <option value="pack" ${b.perUnit === 'pack' ? 'selected' : ''}>per PACK</option>
+              </select></td>
+              <td><button class="btn sm d" data-a="bomRm" data-id="${i}">✕</button></td>
+            </tr>`;
+          }).join('') : '<tr><td colspan="4" class="muted" style="padding:14px;text-align:center">No materials yet. Click + Add below.</td></tr>'}
+        </tbody>
+      </table></div>
+      
+      <button class="btn sm" data-a="bomAdd" style="margin-top:10px">+ Add material</button>
+      
+      <div style="background:#e0f2fe;padding:14px;border-radius:10px;border-left:4px solid #0891b2;margin-top:16px">
+        <b style="font-size:13px">💡 Copy this BOM to save time</b>
+        <p class="muted" style="margin:6px 0 10px;font-size:12px">If other articles use the exact same materials, copy this BOM to them instantly.</p>
+        <button class="btn" data-a="bomCopy" data-id="${it.id}">📋 Copy this BOM to other articles</button>
+      </div>
+    `, `
+      <button class="btn" data-a="close">Cancel</button>
+      <button class="btn p" data-a="bomSave" data-id="${it.id}">Save BOM</button>
+    `, 1);
+  };
+
+  E.A.bomAdd = () => {
+    const tb = E.$('bom_body');
+    if (tb.innerHTML.includes('No materials yet')) tb.innerHTML = '';
+    const idx = Date.now();
+    const materials = E.rows('items').filter(i => i.cat !== 'Finished Good').sort((a, b) => a.art.localeCompare(b.art));
+    tb.insertAdjacentHTML('beforeend', `<tr data-bom="${idx}">
+      <td><select class="bom-mat" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:8px">
+        <option value="">— select material —</option>
+        ${materials.map(m => `<option value="${m.id}">${E.esc(m.art)} — ${E.esc(m.name)}</option>`).join('')}
+      </select></td>
+      <td class="r"><input class="bom-qty" type="number" step="0.0001" style="width:80px;padding:6px;text-align:right;border:1px solid var(--bd);border-radius:8px"></td>
+      <td><select class="bom-per" style="padding:6px;border:1px solid var(--bd);border-radius:8px">
+        <option value="pair">per PAIR</option>
+        <option value="pack">per PACK</option>
+      </select></td>
+      <td><button class="btn sm d" data-a="bomRm" data-id="${idx}">✕</button></td>
+    </tr>`);
+  };
+  E.A.bomRm = (_, e) => { e.target.closest('tr').remove(); };
+
+  E.A.bomSave = async id => {
+    try {
+      const it = E.D.items.find(x => x.id === id);
+      const b = JSON.parse(JSON.stringify(it));
+      const rows = [];
+      document.querySelectorAll('#bom_body tr[data-bom]').forEach(tr => {
+        const matId = tr.querySelector('.bom-mat').value;
+        const qty = parseFloat(tr.querySelector('.bom-qty').value) || 0;
+        const perUnit = tr.querySelector('.bom-per').value;
+        if (matId && qty > 0) rows.push({ itemId: matId, variantId: '', qty, perUnit });
+      });
+      it.bom = rows;
+      await E.save('items', it, b);
+      E.closeM(); E.go();
+      E.toast('BOM saved · ' + rows.length + ' material(s)', 'success');
+    } catch (e) { E.toast(e.message, 'error'); }
+  };
+
+  E.A.bomCopy = id => {
+    const it = E.D.items.find(x => x.id === id);
+    if (!it || !it.bom || !it.bom.length) return E.toast('Add materials to this BOM first', 'error');
+    
+    // Get other Finished Goods
+    const others = E.rows('items').filter(i => i.cat === 'Finished Good' && i.id !== id && i.active).sort((a, b) => a.art.localeCompare(b.art));
+    if (!others.length) return E.toast('No other finished goods to copy to', 'error');
+
+    E.modal('Copy BOM to other articles', `
+      <p class="muted" style="margin-bottom:14px">Select the articles that use the <b>exact same materials</b> as <b>${E.esc(it.art)}</b>.</p>
+      
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn sm" data-a="bomCopyAll">✓ Select all</button>
+        <button class="btn sm" data-a="bomCopyNone">✕ Clear all</button>
+      </div>
+
+      <div style="max-height:340px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px;padding:10px;background:var(--s2)">
+        ${others.map(o => `<label style="display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;border-radius:6px">
+          <input type="checkbox" class="bom-copy-cb" data-id="${o.id}" style="width:auto">
+          <span style="flex:1"><b>${E.esc(o.art)}</b> — ${E.esc(o.name)} <span class="muted">(${o.pack} pairs/pack)</span></span>
+        </label>`).join('')}
+      </div>
+
+      <p class="muted" style="margin-top:10px;font-size:12px">⚠️ This will <b>overwrite</b> any existing BOM on the selected articles.</p>
+    `, `
+      <button class="btn" data-a="close">Cancel</button>
+      <button class="btn p" data-a="bomCopySave" data-id="${id}">Copy to selected</button>
+    `);
+  };
+
+  E.A.bomCopyAll = () => document.querySelectorAll('.bom-copy-cb').forEach(cb => cb.checked = true);
+  E.A.bomCopyNone = () => document.querySelectorAll('.bom-copy-cb').forEach(cb => cb.checked = false);
+
+  E.A.bomCopySave = async fromId => {
+    try {
+      const from = E.D.items.find(x => x.id === fromId);
+      if (!from) throw new Error('Source article not found');
+      
+      const selected = [...document.querySelectorAll('.bom-copy-cb:checked')].map(cb => cb.dataset.id);
+      if (!selected.length) throw new Error('Select at least one article');
+
+      let copied = 0;
+      for (const targetId of selected) {
+        const target = E.D.items.find(x => x.id === targetId);
+        if (!target) continue;
+        const b = JSON.parse(JSON.stringify(target));
+        // Deep copy the BOM array to avoid reference sharing
+        target.bom = JSON.parse(JSON.stringify(from.bom || []));
+        await E.save('items', target, b);
+        copied++;
+      }
+
+      E.closeM(); E.go();
+      E.toast('BOM copied to ' + copied + ' article(s)', 'success');
+    } catch (e) { E.toast(e.message, 'error'); }
   };
 
   E.A.vars = id => {
