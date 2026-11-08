@@ -1,8 +1,5 @@
-/* PART 2 (v5) — Items strictly PER PAIR.
-   ─ price stored as cents PER PAIR
-   ─ BOM qty is strictly PER PAIR (fractional if needed for boxes/ropes)
-   ─ Bulk copy BOM included
-*/
+console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
+
 (E => {
   const n = E.N.find(x => x.id === 'items'); if (n) n.soon = 0;
   const CATS = ['Finished Good', 'Raw Material', 'Accessory', 'Packing'];
@@ -264,7 +261,7 @@
       document.querySelectorAll('#bom_body tr[data-bom]').forEach(tr => {
         const matId = tr.querySelector('.bom-mat').value;
         const qty = parseFloat(tr.querySelector('.bom-qty').value) || 0;
-        if (matId && qty > 0) rows.push({ itemId: matId, variantId: '', qty: qty }); /* perUnit is now removed/implicitly 'pair' */
+        if (matId && qty > 0) rows.push({ itemId: matId, variantId: '', qty: qty }); 
       });
       it.bom = rows;
       await E.save('items', it, b);
