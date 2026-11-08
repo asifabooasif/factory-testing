@@ -1,14 +1,5 @@
-/* Employees — 3 pay categories with V6 model compatibility.
-
-     ─ Wage Worker       → wage runs only (days × rate + piece)
-     ─ Daily Salaried    → daily salary records + wage runs (piece only)
-     ─ Monthly Salaried  → monthly salary runs + wage runs (piece only)
-
-   The `piece` flag is available for ALL types — signals that the person
-   also performs production work, so admins aren't surprised when they
-   appear in wage runs.
-
-   Legacy migration: payType 'Daily' → 'Wage', 'Monthly' → 'MonthlySalaried'.
+/* Employees — 3 pay categories with salaryHistory tracking.
+   Every MonthlySalaried employee's salary change is auto-recorded.
 */
 (E => {
   const n = E.N.find(x => x.id === 'employees');
@@ -44,6 +35,18 @@
     return 'monthly salary + wage runs';
   };
 
+  /* Get current salary for month from history or fallback to current employee.amount */
+  function currentSalaryFor(e, month) {
+    if (payCat(e) !== 'MonthlySalaried') return e.amount || 0;
+    const hist = E.rows('salaryHistory')
+      .filter(h => h.empId === e.id && h.effectiveDate <= month + '-31')
+      .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    return hist.length ? hist[0].amount : (e.amount || 0);
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     LIST
+     ═══════════════════════════════════════════════════════════ */
   function tbl() {
     const s = F.q.toLowerCase();
     const rows = E.rows('employees')
@@ -65,6 +68,7 @@
         const cat = payCat(p);
         const sal = isSalaried(p);
         const bal = sal ? advBal(p.id) : 0;
+        const histCount = payCat(p) === 'MonthlySalaried' ? E.rows('salaryHistory').filter(h => h.empId === p.id).length : 0;
         return `<tr style="${p.active ? '' : 'opacity:.5'}">
           <td>${p.code}</td>
           <td>
@@ -76,6 +80,7 @@
           <td>
             <span class="tag" style="${CAT_STYLE[cat]}">${CAT_LABEL[cat]}</span>
             <div class="muted" style="font-size:11px;margin-top:3px">${paidIn(p)}</div>
+            ${histCount > 1 ? `<div class="muted" style="font-size:10px">${histCount} salary revisions</div>` : ''}
           </td>
           <td class="r">${E.m(p.amount)}${RATE_UNIT[cat]}</td>
           <td class="r">${p.allow ? E.m(p.allow) : '—'}</td>
@@ -86,10 +91,11 @@
             : '<span class="muted">N/A</span>'}</td>
           <td class="r">
             <button class="btn sm" data-a="editEmp" data-id="${p.id}">Edit</button>
+            ${payCat(p) === 'MonthlySalaried' && histCount > 1 ? `<button class="btn sm" data-a="viewSalaryHistory" data-id="${p.id}" title="Salary history">📋</button>` : ''}
             <button class="btn sm d" data-a="delEmp" data-id="${p.id}">${used(p.id) ? (p.active ? 'Deactivate' : 'Activate') : 'Delete'}</button>
           </td>
         </tr>`;
-      }).join('') || '<tr><td colspan="11" class="muted">No employees found</td></tr>'}</tbody>
+      }).join('') || '<tr><td colspan="12" class="muted">No employees found</td></tr>'}</tbody>
     </table></div>`;
   }
 
@@ -119,6 +125,9 @@
     if (e.target.id === 'e_type') updateFormVisibility();
   });
 
+  /* ═══════════════════════════════════════════════════════════
+     FORM
+     ═══════════════════════════════════════════════════════════ */
   const form = id => {
     const p = id ? E.D.employees.find(x => x.id === id) : null;
     const cat = payCat(p);
@@ -199,7 +208,8 @@
       <b>Monthly Salaried</b><br>
       • Fixed monthly salary paid in <b>Monthly Salary runs</b><br>
       • Any piece work paid separately in <b>Wage runs</b><br>
-      • Advances recovered from monthly salary runs (default = field above)`;
+      • Advances recovered from monthly salary runs (default = field above)<br>
+      • <b>Salary changes are auto-tracked</b> with effective date — for accurate historical allocation`;
   }
 
   function updateFormVisibility() {
@@ -215,6 +225,9 @@
   E.A.newEmp = () => form();
   E.A.editEmp = id => form(id);
 
+  /* ═══════════════════════════════════════════════════════════
+     SAVE — with salaryHistory tracking
+     ═══════════════════════════════════════════════════════════ */
   E.A.saveEmp = async id => {
     const name = E.val('e_name');
     const nic = E.val('e_nic');
@@ -230,6 +243,9 @@
 
     const p = id ? E.D.employees.find(x => x.id === id) : { active: true, code: await E.next('EMP') };
     const b = id ? JSON.parse(JSON.stringify(p)) : null;
+    const oldAmount = b ? b.amount : null;
+    const oldAllow = b ? (b.allow || 0) : null;
+    const oldPayType = b ? b.payType : null;
 
     Object.assign(p, {
       name,
@@ -246,11 +262,59 @@
     });
 
     await E.save('employees', p, b);
+
+    /* ═══════════════════════════════════════════════════════════
+       SALARY HISTORY TRACKING
+       Create initial record on new hire; create change record on
+       edit if amount or allowance changed OR pay type became Monthly.
+       ═══════════════════════════════════════════════════════════ */
+    if (cat === 'MonthlySalaried') {
+      const isNew = !id;
+      const amountChanged = oldAmount !== null && oldAmount !== p.amount;
+      const allowChanged = oldAllow !== null && oldAllow !== (p.allow || 0);
+      const becameMonthly = oldPayType !== null && oldPayType !== 'MonthlySalaried' && oldPayType !== 'Monthly';
+
+      if (isNew || amountChanged || allowChanged || becameMonthly) {
+        const effDate = E.today();
+        const histId = 'SH-' + E.fid + '-' + p.id + '-' + effDate;
+        await E.save('salaryHistory', {
+          id: histId,
+          factoryId: E.fid,
+          empId: p.id,
+          effectiveDate: effDate,
+          amount: p.amount,
+          allow: p.allow || 0,
+          payType: cat,
+          recordedAt: new Date().toISOString(),
+          recordedBy: E.user || '',
+          note: isNew ? 'Initial salary' : (becameMonthly ? 'Changed to Monthly Salaried' : 'Salary revision')
+        });
+      }
+    } else if (oldPayType === 'MonthlySalaried' || oldPayType === 'Monthly') {
+      /* Employee changed from Monthly Salaried to something else — record as ending */
+      const effDate = E.today();
+      await E.save('salaryHistory', {
+        id: 'SH-' + E.fid + '-' + p.id + '-' + effDate + '-end',
+        factoryId: E.fid,
+        empId: p.id,
+        effectiveDate: effDate,
+        amount: 0,
+        allow: 0,
+        payType: cat,
+        recordedAt: new Date().toISOString(),
+        recordedBy: E.user || '',
+        note: 'Changed from Monthly Salaried to ' + cat
+      });
+    }
+
     E.closeM();
     E.go();
-    E.toast('Employee saved', 'success');
+    E.toast('Employee saved' + (cat === 'MonthlySalaried' && !id ? ' · salary history started' : ''), 'success');
   };
 
+  /* ═══════════════════════════════════════════════════════════
+     DELETE / DEACTIVATE
+     ═══════════════════════════════════════════════════════════ */
   E.A.delEmp = async id => {
     const p = E.D.employees.find(x => x.id === id);
     if (used(id)) {
@@ -262,5 +326,28 @@
       await E.audit('delete', 'employees', id, p, null);
     }
     E.go();
+  };
+
+  /* ═══════════════════════════════════════════════════════════
+     SALARY HISTORY VIEW
+     ═══════════════════════════════════════════════════════════ */
+  E.A.viewSalaryHistory = id => {
+    const p = E.D.employees.find(x => x.id === id);
+    if (!p) return;
+    const hist = E.rows('salaryHistory').filter(h => h.empId === id).sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    E.modal('Salary History — ' + p.name, `
+      <p class="muted" style="margin-bottom:14px">Every salary change is tracked with effective date. Used for accurate historical cost allocation.</p>
+      ${hist.length ? `<div class="tw"><table>
+        <thead><tr><th>Effective date</th><th class="r">Base</th><th class="r">Allowance</th><th class="r">Total</th><th>Note</th><th>Recorded by</th></tr></thead>
+        <tbody>${hist.map(h => `<tr>
+          <td><b>${h.effectiveDate}</b></td>
+          <td class="r">${E.m(h.amount || 0)}</td>
+          <td class="r">${h.allow ? E.m(h.allow) : '—'}</td>
+          <td class="r"><b>${E.m((h.amount || 0) + (h.allow || 0))}</b></td>
+          <td>${E.esc(h.note || '')}</td>
+          <td class="muted" style="font-size:11px">${E.esc(h.recordedBy || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : '<p class="muted">No salary history yet. It will be tracked automatically when you edit salary.</p>'}
+    `, `<button class="btn" data-a="close">Close</button>`, 1);
   };
 })(window.ERP);
