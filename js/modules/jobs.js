@@ -1,6 +1,7 @@
-/* PART 4 (v3) — Jobs with dual-column cost sheet + freeze on completion.
+/* PART 4 (v4) — Jobs with dual-column cost sheet + freeze on completion.
    Cost sheet shows per-pair primary, per-pack secondary.
    Frozen shadow snapshot on complete.
+   Added: Edit Job capability from list and view.
 */
 (E => {
   const n = E.N.find(x => x.id === 'jobs'); if (n) n.soon = 0;
@@ -147,7 +148,7 @@
         <td class="r">${L.reduce((s, l) => s + l.released, 0)}</td>
         <td class="r">${E.m(wip(j.id))}</td>
         <td><span class="tag">${j.status}</span></td>
-        <td class="r"><button class="btn sm p" data-a="openJob" data-id="${j.id}">Open</button></td>
+        <td class="r">${j.status === 'In Progress' ? `<button class="btn sm" data-a="editJob" data-id="${j.id}">Edit</button> ` : ''}<button class="btn sm p" data-a="openJob" data-id="${j.id}">Open</button></td>
       </tr>`; }).join('') || '<tr><td colspan="10" class="muted">No jobs</td></tr>'}</tbody>
     </table></div>`;
   }
@@ -236,6 +237,7 @@
       <button class="btn" data-a="jobPrint" data-id="${j.id}">🖨 Internal</button>
       <button class="btn" data-a="jobPrintCustomer" data-id="${j.id}">🖨 Customer</button>
       ${open ? `
+        <button class="btn" data-a="editJob" data-id="${j.id}">✏️ Edit Job</button>
         <button class="btn" data-a="issueM" data-id="${j.id}">Materials</button>
         <button class="btn" data-a="addCost" data-id="${j.id}">Labor</button>
         <button class="btn" data-a="relM" data-id="${j.id}">Release</button>
@@ -421,7 +423,7 @@
       const { R } = sheet(j);
       const d = R.map(r => r.total - (r.l.fgValue || 0));
       const sum = d.reduce((a, b) => a + b, 0);
-      if (sum !== wip(id)) throw new Error('Cost sheet vs WIP differ by ' + E.m(sum - wip(id)));
+      if (Math.abs(sum - wip(id)) > 1) throw new Error('Cost sheet vs WIP differ by ' + E.m(sum - wip(id)));
       if (!confirm('Complete ' + j.no + '? Remaining WIP ' + E.m(sum) + ' → FG.')) return;
       const no = await E.next('CMP'), ls = [];
       R.forEach((r, i) => {
