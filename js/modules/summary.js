@@ -1,12 +1,4 @@
-/* Period Summary — month-end or any custom period: production, wages,
-   salaries (daily + monthly), advances, sales, receivables, payables,
-   expenses, stock and every account. Internal report.
-
-   Reads all three pay record kinds:
-     kind='run' type='Weekly'/'Fortnightly'/'Daily'  → Wages
-     kind='run' type='Monthly'                       → Monthly Salary
-     kind='daily-salary'                              → Daily Salary
-*/
+/* Period Summary — includes staff loans in advances outstanding */
 (E => {
   E.nav('Reports', 'summary', '📈', 'Period Summary');
   const pd = n => String(n).padStart(2, '0');
@@ -41,73 +33,47 @@
   }
 
   function payroll() {
-    /* All non-cancelled runs within the period */
     const allIn = E.rows('wageRuns').filter(r => !r.cancelled && inp(r.date));
-    const W = allIn.filter(r => r.kind === 'run' && r.type !== 'Monthly');   // wages
-    const S = allIn.filter(r => r.kind === 'run' && r.type === 'Monthly');  // monthly salary
-    const D = allIn.filter(r => r.kind === 'daily-salary');                 // daily salary
-
-    /* Advance recovery: read both run lines and daily-salary flat records */
+    const W = allIn.filter(r => r.kind === 'run' && r.type !== 'Monthly');
+    const S = allIn.filter(r => r.kind === 'run' && r.type === 'Monthly');
+    const D = allIn.filter(r => r.kind === 'daily-salary');
     const recOf = r => {
       if (r.kind === 'run') return sum(r.lines, l => l.advRec || 0);
       if (r.kind === 'daily-salary') return r.advRec || 0;
       return 0;
     };
-
     const advAll = E.rows('wageRuns').filter(r => r.kind === 'advance' && !r.cancelled);
     const given = sum(advAll.filter(r => inp(r.date)), r => r.amount);
-
-    const runsUpToT = E.rows('wageRuns').filter(r =>
-      !r.cancelled && r.date <= F.t && (r.kind === 'run' || r.kind === 'daily-salary')
-    );
+    const runsUpToT = E.rows('wageRuns').filter(r => !r.cancelled && r.date <= F.t && (r.kind === 'run' || r.kind === 'daily-salary'));
     const advGivenUpToT = sum(advAll.filter(r => r.date <= F.t), r => r.amount);
     const advRecUpToT = sum(runsUpToT, recOf);
-    const outst = advGivenUpToT - advRecUpToT;
+    /* FIX: include staff loans */
+    const loansOutstanding = E.rows('staffLoans').filter(l => !l.cancelled && !l.settled).reduce((s, l) => s + (E.staffLoanTotals ? E.staffLoanTotals(l).principalOut : 0), 0);
+    const outst = advGivenUpToT - advRecUpToT + loansOutstanding;
 
-    /* Per-employee breakdown */
     const per = E.rows('employees').map(e => {
       const cat = payCatName(e);
       const myAdvIn = sum(advAll.filter(r => r.empId === e.id && inp(r.date)), r => r.amount);
-
-      /* wages — from kind='run' where type !== 'Monthly' */
       const wLines = W.map(r => (r.lines || []).find(l => l.empId === e.id)).filter(Boolean);
       const wGross = sum(wLines, l => l.gross || 0);
       const wRec = sum(wLines, l => l.advRec || 0);
-
-      /* monthly salary — from kind='run' where type === 'Monthly' */
       const sLines = S.map(r => (r.lines || []).find(l => l.empId === e.id)).filter(Boolean);
       const sGross = sum(sLines, l => l.gross || 0);
       const sRec = sum(sLines, l => l.advRec || 0);
-
-      /* daily salary — from kind='daily-salary' */
       const dRecs = D.filter(r => r.empId === e.id);
       const dGross = sum(dRecs, r => r.gross || 0);
       const dRec = sum(dRecs, r => r.advRec || 0);
-
-      /* running advance balance */
       const myGiven = sum(advAll.filter(r => r.empId === e.id && r.date <= F.t), r => r.amount);
-      const myRec = sum(runsUpToT.filter(r =>
-        (r.kind === 'run' && (r.lines || []).some(l => l.empId === e.id)) ||
-        (r.kind === 'daily-salary' && r.empId === e.id)
-      ), r => {
+      const myRec = sum(runsUpToT.filter(r => (r.kind === 'run' && (r.lines || []).some(l => l.empId === e.id)) || (r.kind === 'daily-salary' && r.empId === e.id)), r => {
         if (r.kind === 'run') return sum(r.lines.filter(l => l.empId === e.id), l => l.advRec || 0);
         return r.advRec || 0;
       });
-
-      return {
-        e, cat, myAdvIn, wRec, sRec, dRec,
-        wGross, sGross, dGross,
-        advBal: myGiven - myRec,
-        hasData: myAdvIn || wGross || sGross || dGross || (myGiven - myRec)
-      };
+      const myLoans = E.rows('staffLoans').filter(l => l.empId === e.id && !l.cancelled && !l.settled).reduce((s, l) => s + (E.staffLoanTotals ? E.staffLoanTotals(l).principalOut : 0), 0);
+      return { e, cat, myAdvIn, wRec, sRec, dRec, wGross, sGross, dGross, advBal: myGiven - myRec + myLoans, hasData: myAdvIn || wGross || sGross || dGross || (myGiven - myRec) || myLoans };
     }).filter(x => x.hasData);
 
-    const totalW = sum(W, r => r.net || 0);
-    const totalS = sum(S, r => r.net || 0);
-    const totalD = sum(D, r => r.net || 0);
-    const grossW = sum(W, r => r.gross || 0);
-    const grossS = sum(S, r => r.gross || 0);
-    const grossD = sum(D, r => r.gross || 0);
+    const totalW = sum(W, r => r.net || 0), totalS = sum(S, r => r.net || 0), totalD = sum(D, r => r.net || 0);
+    const grossW = sum(W, r => r.gross || 0), grossS = sum(S, r => r.gross || 0), grossD = sum(D, r => r.gross || 0);
 
     return card('2 · Wages & Salaries',
       `<div class="kp">
@@ -115,7 +81,7 @@
         ${E.kpi('Daily Salaries paid', m(totalD), D.length + ' record(s)')}
         ${E.kpi('Monthly Salaries paid', m(totalS), S.length + ' run(s)')}
         ${E.kpi('Advances given', m(given), 'in period')}
-        ${E.kpi('Advances outstanding', m(outst), 'as of ' + F.t)}
+        ${E.kpi('Advances outstanding', m(outst), 'advances + staff loans as of ' + F.t)}
       </div>` +
       tb(['Category', 'Count', 'Gross', 'Net paid'], [
         ['<b>Wages</b> (piece + days)', W.length, m(grossW), m(totalW)],
@@ -123,23 +89,11 @@
         ['<b>Monthly Salaries</b>', S.length, m(grossS), m(totalS)]
       ], ['Total', W.length + D.length + S.length, m(grossW + grossD + grossS), m(totalW + totalD + totalS)]) +
       '<h4 style="margin:14px 0 4px">Employee breakdown</h4>' +
-      tb(
-        ['Employee', 'Category', 'Advances taken', 'Advance recovered', 'Wages gross', 'Daily Sal. gross', 'Monthly Sal. gross', 'Advance balance'],
-        per.map(x => [
-          `<b>${E.esc(x.e.name)}</b><br><span class="muted">${x.e.code || ''}</span>`,
-          `<span style="font-size:11px">${x.cat}</span>`,
-          m(x.myAdvIn),
-          m(x.wRec + x.sRec + x.dRec),
-          m(x.wGross),
-          m(x.dGross),
-          m(x.sGross),
-          m(x.advBal)
-        ])
-      )
+      tb(['Employee', 'Category', 'Advances taken', 'Advance recovered', 'Wages gross', 'Daily Sal. gross', 'Monthly Sal. gross', 'Balance'],
+        per.map(x => [`<b>${E.esc(x.e.name)}</b><br><span class="muted">${x.e.code || ''}</span>`, `<span style="font-size:11px">${x.cat}</span>`, m(x.myAdvIn), m(x.wRec + x.sRec + x.dRec), m(x.wGross), m(x.dGross), m(x.sGross), m(x.advBal)]))
     );
   }
 
-  /* normalise pay type label for the summary */
   function payCatName(e) {
     const pt = (e && e.payType) || 'Wage';
     if (pt === 'MonthlySalaried' || pt === 'Monthly') return 'Monthly';
@@ -185,10 +139,7 @@
   function stock() {
     const sm = E.stockMap();
     let rm = 0, fg = 0;
-    for (const k in sm) {
-      const i = it(k.split('|')[0]);
-      i.cat === 'Finished Good' ? fg += sm[k].value : rm += sm[k].value;
-    }
+    for (const k in sm) { const i = it(k.split('|')[0]); i.cat === 'Finished Good' ? fg += sm[k].value : rm += sm[k].value; }
     return card('8 · Stock position (today)', `<div class="kp">${E.kpi('Raw materials & others', m(rm), 'ledger 1300: ' + m(E.bal('1300')))}${E.kpi('Finished goods', m(fg), 'ledger 1320: ' + m(E.bal('1320')))}${E.kpi('Work in progress', m(E.bal('1310')), 'ledger 1310')}${E.kpi('Total stock value', m(rm + fg + E.bal('1310')), '')}</div>`);
   }
 
@@ -205,7 +156,7 @@
       const cl = a.o + a.dr - a.cr;
       return { c, o: a.o * s, dr: a.dr, cr: a.cr, cl: cl * s };
     }).filter(x => x.o || x.dr || x.cr || x.cl);
-    return card('9 · All accounts — opening, movement and closing', tb(['Account', 'Type', 'Opening', 'Debit', 'Credit', 'Closing'], rows.map(x => [x.c.code + ' ' + E.esc(x.c.name), x.c.type, m(x.o), m(x.dr), m(x.cr), '<b>' + m(x.cl) + '</b>'])) + '<p class="muted">Balances are shown in each account\'s normal side. For every line behind a figure, use Transaction Explorer.</p>');
+    return card('9 · All accounts — opening, movement and closing', tb(['Account', 'Type', 'Opening', 'Debit', 'Credit', 'Closing'], rows.map(x => [x.c.code + ' ' + E.esc(x.c.name), x.c.type, m(x.o), m(x.dr), m(x.cr), '<b>' + m(x.cl) + '</b>'])) + '<p class="muted">Balances are shown in each account\'s normal side.</p>');
   }
 
   const body = () => `<p class="muted">Period <b>${F.f}</b> to <b>${F.t}</b> · internal management report</p>${production()}${payroll()}${sales()}${aging('invoices', '5 · Receivables (customers owe us)', '1200')}${aging('purchases', '6 · Payables (we owe suppliers)', '2000')}${expenses()}${stock()}${accounts()}`;
@@ -222,17 +173,13 @@
 
   E.A.smPrint = () => {
     const w = window.open('', '_blank');
-    if (!w) return E.toast('Allow pop-ups to print', 'error');
+    if (!w) return E.toast('Allow pop-ups', 'error');
     w.document.write('<html><head><title>Period Summary</title><style>body{font:12px Arial;margin:14px}table{width:100%;border-collapse:collapse;margin:6px 0}th,td{border-bottom:1px solid #ccc;padding:4px;text-align:left}.r{text-align:right}.card{margin-bottom:14px}.kp{display:flex;gap:12px;flex-wrap:wrap}.k{border:1px solid #ccc;padding:6px 10px}.k small{display:block;color:#555}.muted{color:#666}</style></head><body><h2>' + E.esc(E.factory().name) + ' — Period Summary</h2>' + E.$('sumb').innerHTML + '</body></html>');
-    w.document.close();
-    setTimeout(() => w.print(), 300);
+    w.document.close(); setTimeout(() => w.print(), 300);
   };
 
   E.hooks.push(e => {
     const f = e.target.dataset && e.target.dataset.f;
-    if (f && f.startsWith('sm.') && e.target.value) {
-      F[f.slice(3)] = e.target.value;
-      E.$('sumb').innerHTML = body();
-    }
+    if (f && f.startsWith('sm.') && e.target.value) { F[f.slice(3)] = e.target.value; E.$('sumb').innerHTML = body(); }
   });
 })(window.ERP);

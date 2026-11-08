@@ -43,6 +43,27 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
   }
   E.genPacks = genPacks; E.genVars = gen;
 
+  /* ── MIGRATION: old perUnit:'pack' BOMs → per-pair ── */
+  async function migrateBomsToPerPair() {
+    if (localStorage.getItem('erp_bom_migrated_v1')) return 0;
+    let n = 0;
+    for (const it of E.rows('items').filter(i => i.cat === 'Finished Good' && (i.bom || []).length)) {
+      const pairsPerPack = it.pack || E.setting('packSize') || 1;
+      const needs = it.bom.some(b => b.perUnit === 'pack');
+      if (!needs) continue;
+      const bl = JSON.parse(JSON.stringify(it));
+      it.bom = it.bom.map(b => {
+        if (b.perUnit === 'pack') return { itemId: b.itemId, variantId: b.variantId || '', qty: +(b.qty / pairsPerPack).toFixed(6) };
+        return { itemId: b.itemId, variantId: b.variantId || '', qty: b.qty };
+      });
+      await E.save('items', it, bl);
+      n++;
+    }
+    if (n) E.toast(n + ' BOM(s) migrated from per-pack to per-pair', 'success');
+    localStorage.setItem('erp_bom_migrated_v1', '1');
+    return n;
+  }
+
   function chips() {
     const rows = E.rows('items').filter(i => F.act === '' || i.active === (F.act === '1'));
     const cnt = k => rows.filter(i => k === 'FG:*' ? i.cat === 'Finished Good' : grpOf(i) === k).length;
@@ -195,23 +216,18 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
     E.go();
   };
 
-  /* ═══════════════════════════════════════════════════════════
-     BOM MANAGEMENT — STRICTLY PER PAIR
-     ═══════════════════════════════════════════════════════════ */
+  /* BOM management — strictly per pair */
   E.A.bomM = id => {
     const it = E.D.items.find(x => x.id === id);
     if (!it) return;
     const bom = it.bom || [];
     const materials = E.rows('items').filter(i => i.cat !== 'Finished Good').sort((a, b) => a.art.localeCompare(b.art));
-
     E.modal('BOM — ' + it.art + ' ' + it.name, `
       <p class="muted" style="margin-bottom:14px"><b style="color:var(--ac)">STRICTLY PER PAIR.</b> Define exactly how much material goes into ONE PAIR. (e.g., if a Box holds 6 pairs, enter 0.1667). This BOM is shared across all colours.</p>
-      
       <div class="tw"><table>
         <thead><tr><th>Material</th><th class="r">Qty (per Pair)</th><th></th></tr></thead>
         <tbody id="bom_body">
           ${bom.length ? bom.map((b, i) => {
-            const mat = E.D.items.find(x => x.id === b.itemId);
             return `<tr data-bom="${i}">
               <td><select class="bom-mat" style="width:100%;padding:6px;border:1px solid var(--bd);border-radius:8px">
                 <option value="">— select material —</option>
@@ -223,18 +239,13 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
           }).join('') : '<tr><td colspan="3" class="muted" style="padding:14px;text-align:center">No materials yet. Click + Add below.</td></tr>'}
         </tbody>
       </table></div>
-      
       <button class="btn sm" data-a="bomAdd" style="margin-top:10px">+ Add material</button>
-      
       <div style="background:#e0f2fe;padding:14px;border-radius:10px;border-left:4px solid #0891b2;margin-top:16px">
         <b style="font-size:13px">💡 Copy this BOM to save time</b>
         <p class="muted" style="margin:6px 0 10px;font-size:12px">If other articles use the exact same materials, copy this BOM to them instantly.</p>
         <button class="btn" data-a="bomCopy" data-id="${it.id}">📋 Copy this BOM to other articles</button>
       </div>
-    `, `
-      <button class="btn" data-a="close">Cancel</button>
-      <button class="btn p" data-a="bomSave" data-id="${it.id}">Save BOM</button>
-    `, 1);
+    `, `<button class="btn" data-a="close">Cancel</button><button class="btn p" data-a="bomSave" data-id="${it.id}">Save BOM</button>`, 1);
   };
 
   E.A.bomAdd = () => {
@@ -261,7 +272,7 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
       document.querySelectorAll('#bom_body tr[data-bom]').forEach(tr => {
         const matId = tr.querySelector('.bom-mat').value;
         const qty = parseFloat(tr.querySelector('.bom-qty').value) || 0;
-        if (matId && qty > 0) rows.push({ itemId: matId, variantId: '', qty: qty }); 
+        if (matId && qty > 0) rows.push({ itemId: matId, variantId: '', qty: qty });
       });
       it.bom = rows;
       await E.save('items', it, b);
@@ -273,30 +284,22 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
   E.A.bomCopy = id => {
     const it = E.D.items.find(x => x.id === id);
     if (!it || !it.bom || !it.bom.length) return E.toast('Add materials to this BOM first', 'error');
-    
     const others = E.rows('items').filter(i => i.cat === 'Finished Good' && i.id !== id && i.active).sort((a, b) => a.art.localeCompare(b.art));
     if (!others.length) return E.toast('No other finished goods to copy to', 'error');
-
     E.modal('Copy BOM to other articles', `
       <p class="muted" style="margin-bottom:14px">Select the articles that use the <b>exact same materials</b> as <b>${E.esc(it.art)}</b>.</p>
-      
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button class="btn sm" data-a="bomCopyAll">✓ Select all</button>
         <button class="btn sm" data-a="bomCopyNone">✕ Clear all</button>
       </div>
-
       <div style="max-height:340px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px;padding:10px;background:var(--s2)">
         ${others.map(o => `<label style="display:flex;align-items:center;gap:10px;padding:6px 4px;cursor:pointer;border-radius:6px">
           <input type="checkbox" class="bom-copy-cb" data-id="${o.id}" style="width:auto">
           <span style="flex:1"><b>${E.esc(o.art)}</b> — ${E.esc(o.name)} <span class="muted">(${o.pack} pairs/pack)</span></span>
         </label>`).join('')}
       </div>
-
       <p class="muted" style="margin-top:10px;font-size:12px">⚠️ This will <b>overwrite</b> any existing BOM on the selected articles.</p>
-    `, `
-      <button class="btn" data-a="close">Cancel</button>
-      <button class="btn p" data-a="bomCopySave" data-id="${id}">Copy to selected</button>
-    `);
+    `, `<button class="btn" data-a="close">Cancel</button><button class="btn p" data-a="bomCopySave" data-id="${id}">Copy to selected</button>`);
   };
 
   E.A.bomCopyAll = () => document.querySelectorAll('.bom-copy-cb').forEach(cb => cb.checked = true);
@@ -306,10 +309,8 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
     try {
       const from = E.D.items.find(x => x.id === fromId);
       if (!from) throw new Error('Source article not found');
-      
       const selected = [...document.querySelectorAll('.bom-copy-cb:checked')].map(cb => cb.dataset.id);
       if (!selected.length) throw new Error('Select at least one article');
-
       let copied = 0;
       for (const targetId of selected) {
         const target = E.D.items.find(x => x.id === targetId);
@@ -319,7 +320,6 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
         await E.save('items', target, b);
         copied++;
       }
-
       E.closeM(); E.go();
       E.toast('BOM copied to ' + copied + ' article(s)', 'success');
     } catch (e) { E.toast(e.message, 'error'); }
@@ -355,4 +355,11 @@ console.log("🔥🔥🔥 NEW ITEMS JS LOADED 🔥🔥🔥");
     const k = E.skuList(() => true).find(s => s.variantId === id);
     if (k) E.printLabels([k], parseInt(prompt('How many labels?', '1')) || 1);
   };
+
+  /* Trigger migration on load */
+  setTimeout(() => {
+    if (E.fid && E.factory && E.factory()) {
+      migrateBomsToPerPair().catch(e => console.warn('BOM migration:', e));
+    }
+  }, 3000);
 })(window.ERP);

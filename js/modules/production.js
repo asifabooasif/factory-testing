@@ -1,6 +1,4 @@
-/* PART 14 (v7) — Production strictly PER PAIR.
-   Material batch deducts: packs × pairsPerPack × qtyPerPair.
-*/
+/* PART 14 (v8) — Production strictly PER PAIR. All 4 tabs implemented. */
 (E => {
   const ni = E.N.findIndex(n => n.id === 'jobs');
   E.N.splice(ni + 1, 0, { g: 'Factory', id: 'production', ico: '🧵', label: 'Daily Production' });
@@ -26,11 +24,7 @@
     const c = i && best('category', i.sub || '');
     const o = op(opId);
     const rCard = a || c;
-    return {
-      rate: (a && a.rate) || (c && c.rate) || (o && o.rate) || 0,
-      rateUnit: (rCard && rCard.rateUnit) || (o && o.rateUnit) || 'pair',
-      piecesPerPair: (rCard && rCard.piecesPerPair) || (o && o.piecesPerPair) || 1
-    };
+    return { rate: (a && a.rate) || (c && c.rate) || (o && o.rate) || 0, rateUnit: (rCard && rCard.rateUnit) || (o && o.rateUnit) || 'pair', piecesPerPair: (rCard && rCard.piecesPerPair) || (o && o.piecesPerPair) || 1 };
   };
   E.opRate = (opId, itemId, date) => E.opRateInfo(opId, itemId, date).rate;
 
@@ -41,30 +35,18 @@
   }
 
   E.empOpts = () => E.rows('employees').filter(e => e.active).sort((a, b) => a.code.localeCompare(b.code)).map(e => `<option value="${E.esc(elabel(e))}" data-k="${E.esc(e.name + ' ' + e.code + ' ' + (e.nic || ''))}">`).join('');
-  const empFind = t => {
-    t = (t || '').trim().toLowerCase();
-    return E.rows('employees').find(e => elabel(e).toLowerCase() === t || e.code.toLowerCase() === t);
-  };
+  const empFind = t => { t = (t || '').trim().toLowerCase(); return E.rows('employees').find(e => elabel(e).toLowerCase() === t || e.code.toLowerCase() === t); };
   const done = (lineId, opId) => live().filter(l => l.lineId === lineId && l.opId === opId).reduce((s, l) => s + l.qty, 0);
 
   E.route('production', 'Daily Production', () => {
-    const TABS = [
-      ['log', '📝 Daily log'],
-      ['batch', '📦 Material Batches'],
-      ['sum', '📊 Summary'],
-      ['prog', '🧭 Job progress'],
-      ['ops', '⚙️ Operations & rates'],
-      ['cons', '🧪 Consumables']
-    ];
+    const TABS = [['log', '📝 Daily log'], ['batch', '📦 Material Batches'], ['sum', '📊 Summary'], ['prog', '🧭 Job progress'], ['ops', '⚙️ Operations & rates'], ['cons', '🧪 Consumables']];
     return `<div class="kp">
       ${E.kpi('Packs today', live().filter(l => l.date === E.today()).reduce((s, l) => s + l.qty, 0), 'packs made')}
       ${E.kpi('Pairs today', live().filter(l => l.date === E.today()).reduce((s, l) => s + (l.convertedQty || l.qty), 0), 'pairs (converted)')}
       ${E.kpi('Wages today', E.m(live().filter(l => l.date === E.today()).reduce((s, l) => s + l.amount, 0)), 'piece work')}
       ${E.kpi('Accrued', E.m(E.bal('2210')), 'unpaid')}
     </div>
-    <div class="bar">
-      ${TABS.map(([k, l]) => `<button class="btn ${F.tab === k ? 'p' : ''}" data-a="prTab" data-id="${k}">${l}</button>`).join('')}
-    </div>
+    <div class="bar">${TABS.map(([k, l]) => `<button class="btn ${F.tab === k ? 'p' : ''}" data-a="prTab" data-id="${k}">${l}</button>`).join('')}</div>
     <div id="prb">${body()}</div>`;
   });
 
@@ -116,7 +98,7 @@
     const can = E.role === 'owner' || E.role === 'accountant';
     return `<div class="card">
       <h3>Record today's work</h3>
-      ${!can ? '<p class="muted">View-only.</p>' : !ops().length ? '<p class="bad">Add operations first</p>' : !active().length ? '<p class="bad">No job in progress</p>' : `
+      ${!can ? '<p class="muted">View-only.</p>' : !ops().length ? '<p class="bad">Add operations first — go to Operations & rates tab</p>' : !active().length ? '<p class="bad">No job in progress</p>' : `
         <div class="g2">
           <div class="f">Date<input id="pr_d" type="date" value="${F.date}" data-f="pr.date"></div>
           <div class="f"><br><span class="muted">Rate auto-fills. Amount = pairs × rate.</span></div>
@@ -191,8 +173,7 @@
           no: no + '-' + (++k), batch: no, date: d,
           empId: x.e.id, jobId: x.j.id, lineId: x.l.id, itemId: x.l.itemId, variantId: x.l.variantId,
           code: x.l.code, opId: x.o.id, opName: x.o.name,
-          qty: x.q, pairsPerPack: x.pairsPerPack,
-          rateUnit: x.info.rateUnit, piecesPerPair: x.info.piecesPerPair,
+          qty: x.q, pairsPerPack: x.pairsPerPack, rateUnit: x.info.rateUnit, piecesPerPair: x.info.piecesPerPair,
           convertedQty: x.convertedQty, rate: x.rt, amount: x.amount,
           status: 'accrued', jeId: je.id, jeNo: je.no, runId: '', runNo: ''
         });
@@ -215,7 +196,6 @@
     } catch (e) { E.toast(e.message, 'error'); }
   };
 
-  /* Material Batches — STRICTLY PER PAIR */
   function matTab() {
     const jobs = active();
     if (!jobs.length) return '<div class="card muted">No job in progress.</div>';
@@ -251,11 +231,10 @@
     if (!lineId || qty <= 0) { box.innerHTML = '<p class="muted">Select article & packs.</p>'; if (btn) btn.disabled = true; return; }
     const line = E.D.jobLines.find(l => l.id === lineId);
     const item = line && it(line.itemId);
-    if (!item || !(item.bom || []).length) { box.innerHTML = '<p class="bad">No BOM on this article.</p>'; if (btn) btn.disabled = true; return; }
-    
+    if (!item || !(item.bom || []).length) { box.innerHTML = '<p class="bad">No BOM on this article. Add it on the Items page first.</p>'; if (btn) btn.disabled = true; return; }
     const pairsPerPack = item.pack || 1;
     const rows = item.bom.map(b => {
-      const need = r3(b.qty * qty * pairsPerPack); /* STRICTLY PER PAIR */
+      const need = r3(b.qty * qty * pairsPerPack);
       const sku = E.skuList().find(s => s.itemId === b.itemId && s.variantId === (b.variantId || ''));
       const st = E.stock(b.itemId, b.variantId);
       const avgCost = st.qty > 0 ? Math.round(st.value / st.qty) : 0;
@@ -291,10 +270,128 @@
       E.go(); E.toast(no + ' posted', 'success');
     } catch (e) { E.toast(e.message, 'error'); }
   };
-  
-  /* Rest of the file (sumTab, progTab, opsTab, consTab) remains the same as previous v6 */
-  function sumTab() { return '<div class="card">Summary view (unchanged)</div>'; } // Kept minimal for brevity
-  function progTab() { return '<div class="card">Job progress view (unchanged)</div>'; }
-  function opsTab() { return '<div class="card">Operations view (unchanged)</div>'; }
-  function consTab() { return '<div class="card">Consumables view (unchanged)</div>'; }
+
+  /* ─── TAB 3: SUMMARY ─────────────────────────────────── */
+  function sumTab() {
+    const d = F.date;
+    const L = live().filter(l => l.date === d);
+    const byWorker = {}, byOp = {}, byJob = {};
+    L.forEach(l => {
+      (byWorker[l.empId] = byWorker[l.empId] || { qty: 0, amount: 0, pairs: 0 });
+      byWorker[l.empId].qty += l.qty; byWorker[l.empId].pairs += (l.convertedQty || l.qty); byWorker[l.empId].amount += l.amount;
+      (byOp[l.opId] = byOp[l.opId] || { qty: 0, amount: 0, pairs: 0 });
+      byOp[l.opId].qty += l.qty; byOp[l.opId].pairs += (l.convertedQty || l.qty); byOp[l.opId].amount += l.amount;
+      (byJob[l.jobId] = byJob[l.jobId] || { qty: 0, amount: 0, pairs: 0 });
+      byJob[l.jobId].qty += l.qty; byJob[l.jobId].pairs += (l.convertedQty || l.qty); byJob[l.jobId].amount += l.amount;
+    });
+    const tot = L.reduce((s, l) => s + l.amount, 0);
+    const mk = (title, M, labFn) => `<div class="card"><h3>${title}</h3><div class="tw"><table><thead><tr><th>Item</th><th class="r">Packs</th><th class="r">Pairs</th><th class="r">Wages</th></tr></thead><tbody>${Object.entries(M).map(([k, v]) => `<tr><td>${labFn(k)}</td><td class="r">${v.qty}</td><td class="r">${v.pairs}</td><td class="r">${E.m(v.amount)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No entries</td></tr>'}<tr style="background:var(--s2)"><td><b>Total</b></td><td class="r"><b>${Object.values(M).reduce((s, v) => s + v.qty, 0)}</b></td><td class="r"><b>${Object.values(M).reduce((s, v) => s + v.pairs, 0)}</b></td><td class="r"><b>${E.m(tot)}</b></td></tr></tbody></table></div></div>`;
+    return `<div class="bar"><span class="muted">Date</span><input type="date" class="fs" data-f="pr.date" value="${d}"><span class="gap"></span><button class="btn" data-a="prSumCsv">⬇ CSV</button></div>${mk('By Worker', byWorker, id => E.esc((emp(id) || {}).name || '?'))}${mk('By Operation', byOp, id => E.esc((op(id) || {}).name || '?'))}${mk('By Job', byJob, id => E.esc((J(id) || {}).no || '?'))}`;
+  }
+  E.A.prSumCsv = () => {
+    const d = F.date;
+    const L = live().filter(l => l.date === d);
+    const rows = [['No', 'Worker', 'Job', 'Article', 'Operation', 'Packs', 'Pairs', 'Rate', 'Amount'].join(',')];
+    L.forEach(l => {
+      rows.push([
+        l.no, (emp(l.empId) || {}).name || '', (J(l.jobId) || {}).no || '', l.code, l.opName,
+        l.qty, l.convertedQty || l.qty, (l.rate / 100).toFixed(2), (l.amount / 100).toFixed(2)
+      ].map(E.csvCell).join(','));
+    });
+    E.download('production-' + d + '.csv', rows.join('\n'), 'text/csv');
+  };
+
+  /* ─── TAB 4: JOB PROGRESS ──────────────────────────── */
+  function progTab() {
+    const jobs = active();
+    if (!jobs.length) return '<div class="card muted">No jobs in progress.</div>';
+    return jobs.map(j => {
+      const lines = E.rows('jobLines').filter(l => l.jobId === j.id);
+      const allOps = E.rows('operations').filter(o => o.active !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
+      const rows = lines.map(l => {
+        const target = l.target;
+        const cells = allOps.map(o => {
+          const dn = live().filter(x => x.lineId === l.id && x.opId === o.id).reduce((s, x) => s + x.qty, 0);
+          const pct = target ? Math.round(dn / target * 100) : 0;
+          return `<td class="r"><div style="background:#eee;border-radius:4px;height:16px;position:relative"><div style="background:${pct >= 100 ? '#059669' : pct > 0 ? '#d97706' : '#e5e7eb'};height:100%;width:${Math.min(pct, 100)}%;border-radius:4px"></div><span style="position:absolute;left:50%;top:0;transform:translateX(-50%);font-size:10px;line-height:16px;font-weight:600">${dn}/${target}</span></div></td>`;
+        }).join('');
+        return `<tr><td><b>${E.esc(l.code)}</b></td>${cells}</tr>`;
+      }).join('');
+      return `<div class="card"><h3>${E.esc(j.no)} · ${E.esc((E.D.parties.find(p => p.id === j.partyId) || { name: 'Stock' }).name)}</h3><div class="tw"><table><thead><tr><th>Article</th>${allOps.map(o => `<th class="r">${E.esc(o.name)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    }).join('');
+  }
+
+  /* ─── TAB 5: OPERATIONS & RATES ──────────────────────── */
+  function opsTab() {
+    const O = E.rows('operations').sort((a, b) => (a.order || 0) - (b.order || 0));
+    const rc = E.rows('rateCards');
+    const can = E.role === 'owner' || E.role === 'accountant';
+    return `<div class="card"><div class="bar"><span class="gap"></span>${can ? '<button class="btn sm" data-a="opStd">+ Add standard operations</button><button class="btn p" data-a="opNew">+ Operation</button><button class="btn" data-a="rcNew">+ Rate override</button>' : ''}</div>
+      <div class="tw"><table><thead><tr><th>Order</th><th>Operation</th><th class="r">Rate/pair</th><th class="r">Pieces/pair</th><th>Active</th>${can ? '<th></th>' : ''}</tr></thead><tbody>${O.map(o => `<tr><td>${o.order || 0}</td><td><b>${E.esc(o.name)}</b></td><td class="r">${E.m(o.rate || 0)}</td><td class="r">${o.piecesPerPair || 1}</td><td>${o.active === false ? 'No' : 'Yes'}</td>${can ? `<td class="r"><button class="btn sm" data-a="opEdit" data-id="${o.id}">Edit</button> <button class="btn sm d" data-a="opDel" data-id="${o.id}">${o.active === false ? 'Activate' : 'Deactivate'}</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="6" class="muted">No operations yet. Click "Add standard operations".</td></tr>'}</tbody></table></div>
+      ${rc.length ? '<h4 style="margin:14px 0 6px">Rate overrides</h4><div class="tw"><table><thead><tr><th>Operation</th><th>Scope</th><th>Item/Category</th><th class="r">Rate</th><th>From</th></tr></thead><tbody>' + rc.map(c => { const o = op(c.opId); const item = c.scope === 'article' ? E.D.items.find(x => x.id === c.ref) : null; return `<tr><td>${E.esc(o ? o.name : '?')}</td><td>${c.scope}</td><td>${E.esc(c.scope === 'article' ? (item ? item.art + ' ' + item.name : '') : c.ref)}</td><td class="r">${E.m(c.rate || 0)}</td><td>${c.from || ''}</td></tr>`; }).join('') + '</tbody></table></div>' : ''}
+    </div>`;
+  }
+  E.A.opNew = () => E.modal('New operation', `<div class="g2"><div class="f">Name *<input id="op_n"></div><div class="f">Order<input id="op_o" type="number" value="0"></div><div class="f">Rate per PAIR (Rs) *<input id="op_r" type="number" step="0.01"></div><div class="f">Pieces per pair<input id="op_p" type="number" step="0.01" value="1"></div></div>`, `<button class="btn" data-a="close">Cancel</button><button class="btn p" data-a="opSave">Save</button>`);
+  E.A.opSave = async () => {
+    try {
+      const name = E.val('op_n'), rate = E.c(E.val('op_r'));
+      if (!name) throw new Error('Enter name');
+      if (!(rate > 0)) throw new Error('Enter rate');
+      await E.save('operations', { name, order: parseInt(E.val('op_o')) || 0, rate, rateUnit: 'pair', piecesPerPair: parseFloat(E.val('op_p')) || 1, active: true });
+      E.closeM(); E.go(); E.toast('Operation saved', 'success');
+    } catch (e) { E.toast(e.message, 'error'); }
+  };
+  E.A.opEdit = id => { const o = op(id); if (!o) return; E.modal('Edit ' + o.name, `<div class="g2"><div class="f">Name *<input id="op_n" value="${E.esc(o.name)}"></div><div class="f">Order<input id="op_o" type="number" value="${o.order || 0}"></div><div class="f">Rate per PAIR (Rs) *<input id="op_r" type="number" step="0.01" value="${(o.rate / 100).toFixed(2)}"></div><div class="f">Pieces per pair<input id="op_p" type="number" step="0.01" value="${o.piecesPerPair || 1}"></div></div>`, `<button class="btn" data-a="close">Cancel</button><button class="btn p" data-a="opSaveEdit" data-id="${id}">Save</button>`); };
+  E.A.opSaveEdit = async id => {
+    try {
+      const o = op(id); if (!o) throw new Error('Not found');
+      const b = JSON.parse(JSON.stringify(o));
+      o.name = E.val('op_n'); o.order = parseInt(E.val('op_o')) || 0;
+      o.rate = E.c(E.val('op_r')); o.piecesPerPair = parseFloat(E.val('op_p')) || 1;
+      await E.save('operations', o, b);
+      E.closeM(); E.go(); E.toast('Operation updated', 'success');
+    } catch (e) { E.toast(e.message, 'error'); }
+  };
+  E.A.opDel = async id => { const o = op(id); if (!o) return; const b = JSON.parse(JSON.stringify(o)); o.active = o.active === false; await E.save('operations', o, b); E.go(); };
+  E.A.opStd = async () => {
+    const STD = ['Top making', 'Upper making', 'Sole fixing', 'Buckle fitting', 'Finishing', 'Packing'];
+    let n = 0;
+    for (let i = 0; i < STD.length; i++) {
+      if (E.rows('operations').some(x => x.name === STD[i])) continue;
+      await E.save('operations', { name: STD[i], order: i, rate: 0, rateUnit: 'pair', piecesPerPair: 1, active: true });
+      n++;
+    }
+    E.go(); E.toast(n + ' standard operations added — now set the rates', 'success');
+  };
+  E.A.rcNew = () => {
+    const ops_ = E.rows('operations').filter(o => o.active !== false);
+    if (!ops_.length) return E.toast('Add operations first', 'error');
+    const cats = E.fgCats();
+    const items = E.rows('items').filter(i => i.cat === 'Finished Good' && i.active);
+    E.modal('New rate override', `<div class="g2"><div class="f">Operation *<select id="rc_o">${ops_.map(o => `<option value="${o.id}">${E.esc(o.name)}</option>`).join('')}</select></div><div class="f">Scope *<select id="rc_s" onchange="E.A.rcScope()"><option value="category">Category (all articles)</option><option value="article">Specific article</option></select></div><div class="f" id="rc_c_grp">Category<select id="rc_c">${cats.map(c => `<option>${E.esc(c)}</option>`).join('')}</select></div><div class="f" id="rc_i_grp" style="display:none">Article<select id="rc_i">${items.map(i => `<option value="${i.id}">${E.esc(i.art)} ${E.esc(i.name)}</option>`).join('')}</select></div><div class="f">Rate per PAIR (Rs) *<input id="rc_r" type="number" step="0.01"></div><div class="f">From date<input id="rc_f" type="date" value="${E.today()}"></div></div>`, `<button class="btn" data-a="close">Cancel</button><button class="btn p" data-a="rcSave">Save</button>`);
+  };
+  E.A.rcScope = () => { const s = E.val('rc_s'); E.$('rc_c_grp').style.display = s === 'category' ? '' : 'none'; E.$('rc_i_grp').style.display = s === 'article' ? '' : 'none'; };
+  E.A.rcSave = async () => {
+    try {
+      const o = E.val('rc_o'), s = E.val('rc_s'), ref = s === 'category' ? E.val('rc_c') : E.val('rc_i'), r = E.c(E.val('rc_r')), f = E.val('rc_f');
+      if (!(r > 0)) throw new Error('Enter rate');
+      await E.save('rateCards', { opId: o, scope: s, ref, rate: r, rateUnit: 'pair', piecesPerPair: 1, from: f });
+      E.closeM(); E.go(); E.toast('Rate override saved', 'success');
+    } catch (e) { E.toast(e.message, 'error'); }
+  };
+
+  /* ─── TAB 6: CONSUMABLES ────────────────────────────── */
+  function consTab() {
+    const cons = E.rows('items').filter(i => i.consumable);
+    if (!cons.length) return '<div class="card"><h3>Consumables</h3><p class="muted">No consumable materials (glue, thread, etc.) configured. Mark them on the Items page.</p></div>';
+    const startDate = F.from || E.today().slice(0, 8) + '01';
+    const endDate = F.to || E.today();
+    const rows = cons.map(item => {
+      const use = E.rows('stockMoves').filter(m => m.itemId === item.id && m.type === 'issue' && m.date >= startDate && m.date <= endDate);
+      const usedQty = use.reduce((s, m) => s + Math.abs(m.qty), 0);
+      const usedVal = use.reduce((s, m) => s + Math.abs(m.value), 0);
+      return `<tr><td><b>${E.esc(item.art)}</b> ${E.esc(item.name)}</td><td>${E.esc(item.consumableMode || 'bom')}</td><td class="r">${usedQty.toFixed(3)} ${E.esc(item.unit || '')}</td><td class="r">${E.m(usedVal)}</td><td class="r">${E.m(E.stock(item.id, '').value)}</td></tr>`;
+    }).join('');
+    return `<div class="bar"><span class="muted">From</span><input type="date" class="fs" data-f="pr.from" value="${startDate}"><span class="muted">to</span><input type="date" class="fs" data-f="pr.to" value="${endDate}"></div><div class="card"><h3>Consumables usage</h3><div class="tw"><table><thead><tr><th>Item</th><th>Mode</th><th class="r">Used</th><th class="r">Value</th><th class="r">On hand</th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Consumables tracked through material batches (BOM mode) or manual inventory adjustments.</p></div>`;
+  }
 })(window.ERP);

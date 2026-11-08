@@ -1,21 +1,17 @@
 /* Fixed Expenses — monthly amounts used for daily allocation.
-   User enters each month's budgeted amount per expense head.
-   System computes daily rate = total / working days.
+   FIX: 5290/5295/5390 excluded from allocation heads.
 */
 (E => {
   E.nav('Accounting', 'fixedexpenses', '🏢', 'Fixed Expenses');
-
   let CM = E.today().slice(0, 7);
-
   const monthRec = m => E.rows('fixedExpenses').filter(f => f.month === m);
   const getExpense = (m, code) => monthRec(m).find(f => f.code === code);
+  const EXCLUDE = ['5290', '5295', '5390'];
 
-  /* Monthly salary aggregate from employees + salaryHistory */
   E.salaryAggregate = function(month) {
     const emps = E.rows('employees').filter(e => e.active && e.payType === 'MonthlySalaried');
     let total = 0;
     emps.forEach(e => {
-      /* Use latest salaryHistory ≤ month-end, or current employee.amount */
       const hist = E.rows('salaryHistory')
         .filter(h => h.empId === e.id && h.effectiveDate <= month + '-31')
         .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
@@ -25,29 +21,20 @@
     });
     return total;
   };
-
-  /* Get all fixed 'days'-method expenses for month */
   E.fixedDaysExpenses = function(month) {
     const recs = monthRec(month).filter(f => f.allocMethod === 'days' && f.amount > 0);
     return recs.map(r => ({ code: r.code, name: r.name, amount: r.amount }));
   };
-
-  /* Total for month: days-method expenses + salary aggregate */
   E.totalFixedForMonth = function(month) {
     const days = E.fixedDaysExpenses(month).reduce((s, e) => s + e.amount, 0);
     return days + E.salaryAggregate(month);
   };
-
-  /* Daily rate */
   E.dailyFixedRate = function(month) {
     const wd = E.workingDaysIn ? E.workingDaysIn(month) : 0;
     if (wd === 0) return 0;
     return Math.round(E.totalFixedForMonth(month) / wd);
   };
 
-  /* ═══════════════════════════════════════════════════════════
-     ROUTE
-     ═══════════════════════════════════════════════════════════ */
   E.route('fixedexpenses', 'Fixed Expenses', () => {
     const month = CM;
     const existing = monthRec(month);
@@ -58,9 +45,11 @@
     const totalAll = totalDaysMethod + salaryAgg;
     const dailyRate = wdCount > 0 ? Math.round(totalAll / wdCount) : 0;
 
-    /* Available expense heads */
+    /* FIX: excluded 5290/5295/5390 */
     const heads = E.rows('coa')
-      .filter(a => a.type === 'expense' && a.nature && !['contra', 'cogs', 'loss', 'dm', 'dl'].includes(a.nature) && !a.inactive)
+      .filter(a => a.type === 'expense' && a.nature
+        && !['contra', 'cogs', 'loss', 'dm', 'dl'].includes(a.nature)
+        && !EXCLUDE.includes(a.code) && !a.inactive)
       .sort((a, b) => a.code.localeCompare(b.code));
 
     return `<div class="card">
@@ -75,24 +64,15 @@
           <button class="btn sm" data-a="feNext">▶</button>
         </div>
       </div>
-
       <div class="kp">
         ${E.kpi('Days-method total', E.m(totalDaysMethod), daysMethodExp.length + ' expense(s)')}
         ${E.kpi('Salary aggregate', E.m(salaryAgg), 'auto from employees')}
         ${E.kpi('Working days', wdCount, 'this month')}
         ${E.kpi('Daily rate', dailyRate > 0 ? E.m(dailyRate) + '/day' : '—', dailyRate > 0 ? 'split across active jobs' : 'set working days first')}
       </div>
-
       ${wdCount === 0 ? '<div style="background:#fef3c7;padding:12px;border-radius:8px;border-left:4px solid #d97706;margin-bottom:14px"><b>⚠ Working days not set</b> — open <a href="#/workingdays" style="color:var(--ac)">System → Working Days</a> first.</div>' : ''}
-
       <div class="tw"><table>
-        <thead><tr>
-          <th>Expense head</th>
-          <th>Allocation method</th>
-          <th class="r">Monthly amount</th>
-          <th class="r">Daily rate</th>
-          <th></th>
-        </tr></thead>
+        <thead><tr><th>Expense head</th><th>Allocation method</th><th class="r">Monthly amount</th><th class="r">Daily rate</th><th></th></tr></thead>
         <tbody>
           ${heads.map(h => {
             const rec = getExpense(month, h.code);
@@ -115,14 +95,12 @@
           }).join('')}
         </tbody>
       </table></div>
-
       <div style="margin-top:14px;padding:12px;background:var(--s2);border-radius:8px;font-size:12px;color:var(--t3)">
         <b>💡 Two numbers, two purposes:</b><br>
         • <b>Fixed Expenses (this page)</b> — budgeted amount for cost allocation to jobs by days.<br>
         • <b>Actual Expenses</b> — enter when you pay a bill (Expenses & Costs page). Real amount hits the ledger.<br>
         Both can differ — reconciliation report shows the variance.
       </div>
-
       <div class="card" style="margin-top:16px;background:var(--acs)">
         <h3>📊 Salary aggregate detail</h3>
         <p class="muted" style="margin-bottom:8px">Sum of all active Monthly-Salaried employees. Salary changes are tracked per effective date.</p>
@@ -135,20 +113,12 @@
             const h = hist[0];
             const amt = h ? h.amount : (e.amount || 0);
             const allow = h ? (h.allow || 0) : (e.allow || 0);
-            return `<tr>
-              <td>${E.esc(e.name)}</td>
-              <td class="r">${E.m(amt)}</td>
-              <td class="r">${allow ? E.m(allow) : '—'}</td>
-              <td class="r"><b>${E.m(amt + allow)}</b></td>
-              <td>${h ? h.effectiveDate : 'current'}</td>
-            </tr>`;
+            return `<tr><td>${E.esc(e.name)}</td><td class="r">${E.m(amt)}</td><td class="r">${allow ? E.m(allow) : '—'}</td><td class="r"><b>${E.m(amt + allow)}</b></td><td>${h ? h.effectiveDate : 'current'}</td></tr>`;
           }).join('') || '<tr><td colspan="5" class="muted">No monthly-salaried employees</td></tr>'}
           <tr style="background:var(--s2)"><td colspan="3"><b>Total salary aggregate</b></td><td class="r"><b>${E.m(salaryAgg)}</b></td><td></td></tr>
           </tbody>
         </table></div>
-        <p class="muted" style="margin-top:8px;font-size:11px">To change someone's salary: edit them in <a href="#/employees" style="color:var(--ac)">Employees</a>. The system auto-records the change with effective date.</p>
       </div>
-
       <div class="bar" style="margin-top:16px">
         <button class="btn" data-a="feCopyPrev">↩ Copy all from last month</button>
         <span class="gap"></span>
@@ -199,17 +169,10 @@
       const method = E.val('fe_m');
       const amt = E.c(E.val('fe_a'));
       const notes = E.val('fe_n');
-
       if (method && !(amt > 0)) throw new Error('Enter amount > 0 or choose a non-allocated method');
-
       const existing = getExpense(CM, code);
       const id = 'FE-' + E.fid + '-' + CM + '-' + code;
-      const rec = {
-        id, factoryId: E.fid, month: CM, code,
-        name: h.name, allocMethod: method || '',
-        amount: method ? amt : 0, notes,
-        updatedAt: new Date().toISOString()
-      };
+      const rec = { id, factoryId: E.fid, month: CM, code, name: h.name, allocMethod: method || '', amount: method ? amt : 0, notes, updatedAt: new Date().toISOString() };
       const b = existing ? JSON.parse(JSON.stringify(existing)) : null;
       await E.save('fixedExpenses', rec, b);
       E.closeM(); E.go();
@@ -222,20 +185,13 @@
     const h = E.acct(code);
     const amt = parseInt(amtStr, 10);
     const existing = getExpense(CM, code);
-    const rec = {
-      id: 'FE-' + E.fid + '-' + CM + '-' + code,
-      factoryId: E.fid, month: CM, code,
-      name: h.name, allocMethod: 'days', amount: amt, notes: 'Copied from previous month',
-      updatedAt: new Date().toISOString()
-    };
+    const rec = { id: 'FE-' + E.fid + '-' + CM + '-' + code, factoryId: E.fid, month: CM, code, name: h.name, allocMethod: 'days', amount: amt, notes: 'Copied from previous month', updatedAt: new Date().toISOString() };
     const b = existing ? JSON.parse(JSON.stringify(existing)) : null;
     await E.save('fixedExpenses', rec, b);
-    E.go();
-    E.toast('Inherited ' + E.m(amt), 'success');
+    E.go(); E.toast('Inherited ' + E.m(amt), 'success');
   };
 
   E.A.feCopyPrev = async () => {
-    /* Get previous month */
     const [y, m] = CM.split('-').map(Number);
     const pm = (m === 1 ? y - 1 : y) + '-' + String(m === 1 ? 12 : m - 1).padStart(2, '0');
     const prevRecs = monthRec(pm);
@@ -245,18 +201,12 @@
       if (r.amount <= 0) continue;
       const existing = getExpense(CM, r.code);
       const id = 'FE-' + E.fid + '-' + CM + '-' + r.code;
-      const newRec = {
-        id, factoryId: E.fid, month: CM, code: r.code,
-        name: r.name, allocMethod: r.allocMethod, amount: r.amount,
-        notes: 'Copied from ' + pm,
-        updatedAt: new Date().toISOString()
-      };
+      const newRec = { id, factoryId: E.fid, month: CM, code: r.code, name: r.name, allocMethod: r.allocMethod, amount: r.amount, notes: 'Copied from ' + pm, updatedAt: new Date().toISOString() };
       const b = existing ? JSON.parse(JSON.stringify(existing)) : null;
       await E.save('fixedExpenses', newRec, b);
       n++;
     }
-    E.go();
-    E.toast(n + ' expense(s) copied from ' + pm, 'success');
+    E.go(); E.toast(n + ' expense(s) copied from ' + pm, 'success');
   };
 
   E.A.feRecompute = () => {

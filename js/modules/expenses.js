@@ -1,14 +1,17 @@
-/* PART 15 (v4) — Expenses with closed-job redirect to 5390.
-   Live preview of job cost impact. Completed jobs → 5390 Closed Job Adjustments.
+/* PART 15 (v5) — Expenses with closed-job redirect to 5390.
+   Fixes: 5390/5290/5295 excluded from overhead pool & cost analysis.
 */
 (E => {
   const pi = E.N.findIndex(n => n.id === 'petty');
   E.N.splice(pi + 1, 0, { g: 'Accounting', id: 'expenses', ico: '🧾', label: 'Expenses & Costs' });
-
   const F = { tab: 'reg', q: '', nat: '', tr: '', from: E.today().slice(0, 8) + '01', to: E.today() };
   const J = id => E.D.jobs.find(x => x.id === id);
   const active = () => E.rows('jobs').filter(j => j.status === 'In Progress');
-  const heads = () => E.rows('coa').filter(a => a.type === 'expense' && a.nature && !['contra', 'cogs', 'loss'].includes(a.nature) && !a.inactive).sort((a, b) => a.code.localeCompare(b.code));
+  const EXCLUDE_POOL = ['5290', '5295', '5390'];
+  const heads = () => E.rows('coa').filter(a => a.type === 'expense' && a.nature
+    && !['contra', 'cogs', 'loss'].includes(a.nature)
+    && !EXCLUDE_POOL.includes(a.code) && !a.inactive)
+    .sort((a, b) => a.code.localeCompare(b.code));
   const hl = a => a.code + ' — ' + a.name;
   const findHead = t => { t = (t || '').trim().toLowerCase(); return heads().find(a => hl(a).toLowerCase() === t || a.code === t); };
   const TR = { job: 'Charged to job(s)', pool: 'Factory overhead pool', period: 'Period expense' };
@@ -156,7 +159,6 @@
     const amt = E.c(E.val('ex_a'));
     const tr = E.val('ex_t');
     if (!a || !amt) { box.innerHTML = ''; return; }
-
     const jobDetails = [];
     document.querySelectorAll('.exs').forEach(i => {
       const pct = Math.round((parseFloat(i.value) || 0) * 100);
@@ -168,10 +170,8 @@
         if (job) jobDetails.push({ job, amount: v, pct });
       }
     });
-
     const totalPct = [...document.querySelectorAll('.exs')].reduce((s, i) => s + (Math.round((parseFloat(i.value) || 0) * 100)), 0);
     const poolBal = unabsorbed();
-
     let summary = '';
     if (tr === 'job') {
       const inProgress = jobDetails.filter(j => j.job.status === 'In Progress');
@@ -205,7 +205,6 @@
       if (amt <= 0) throw new Error('Enter amount');
       if (!pm) throw new Error('Choose payment');
       if (!d) throw new Error('Choose date');
-
       let jobs = [];
       if (tr === 'job') {
         const sp = [...document.querySelectorAll('.exs')].map(i => ({ id: i.dataset.id, p: Math.round((parseFloat(i.value) || 0) * 100) })).filter(x => x.p > 0);
@@ -214,15 +213,11 @@
         let left = amt;
         jobs = sp.map((x, i) => { const v = i === sp.length - 1 ? left : Math.round(amt * x.p / 10000); left -= v; return { jobId: x.id, amount: v }; });
       }
-
       if (pm !== 'ACCR' && E.bal(pm) < amt && !confirm('Balance < expense. Continue?')) return;
-
       const no = await E.next('EXP');
       const cr = pm === 'ACCR' ? '2300' : pm;
       const payee = E.val('ex_p');
       const narr = [a.name, E.val('ex_n'), payee && 'to ' + payee].filter(Boolean).join(' · ');
-
-      /* Split jobs into in-progress vs completed */
       const lines = [];
       const closedVar = [];
       if (tr === 'job') {
@@ -239,26 +234,18 @@
         lines.push({ acc: a.code, dr: amt });
       }
       lines.push({ acc: cr, cr: amt });
-
       const je = await E.post({ date: d, ref: no, narr, source: 'expense', lines });
-
       await E.save('expenses', {
         kind: 'voucher', no, date: d, head: a.code, headName: a.name, nature: a.nature, treatment: tr, amount: amt,
         pay: pm, payee, ref: E.val('ex_r'), narr: E.val('ex_n'), jobs,
-        jeId: je.id, jeNo: je.no, cancelled: false, paid: false,
-        closedVarCount: closedVar.length
+        jeId: je.id, jeNo: je.no, cancelled: false, paid: false, closedVarCount: closedVar.length
       });
-
-      /* Save closed job variances */
       for (const cv of closedVar) {
         await E.save('closedJobVariances', {
-          factoryId: E.fid, jobId: cv.jobId, jobNo: cv.jobNo,
-          type: 'late-expense', amount: cv.amount, date: d,
-          closedDate: cv.closedDate, notes: a.name + ' · ' + no,
-          sourceJeId: je.id, createdAt: new Date().toISOString()
+          factoryId: E.fid, jobId: cv.jobId, jobNo: cv.jobNo, type: 'late-expense', amount: cv.amount, date: d,
+          closedDate: cv.closedDate, notes: a.name + ' · ' + no, sourceJeId: je.id, createdAt: new Date().toISOString()
         });
       }
-
       E.closeM(); E.go();
       const msg = no + ' posted' + (closedVar.length ? ' · ' + closedVar.length + ' to 5390 (completed job)' : tr === 'job' ? ' → ' + jobs.length + ' job(s)' : '');
       E.toast(msg, closedVar.length ? 'warning' : 'success');
@@ -300,7 +287,11 @@
     } catch (e) { E.toast(e.message, 'error'); }
   };
 
-  const poolAccts = () => E.rows('coa').filter(a => a.type === 'expense' && a.nature === 'oh');
+  /* ─── FIX: Exclude 5290/5295/5390 from overhead pool ─── */
+  const poolAccts = () => E.rows('coa').filter(a =>
+    a.type === 'expense' && a.nature === 'oh' &&
+    !['5290', '5295', '5390'].includes(a.code) && !a.inactive
+  );
   E.unabsorbed = () => unabsorbed();
   function unabsorbed() {
     const t = E.totals();
@@ -392,8 +383,17 @@
     const H = {};
     E.rows('journalEntries').filter(j => j.date >= F.from && j.date <= F.to).forEach(j => j.lines.forEach(l => {
       let h = '';
-      if (l.acc === '1310') { if (l.head) h = l.head; else if (l.cat === 'Material') h = '5000'; else if (l.cat === 'Labour') h = '5110'; else if (l.cat === 'Overhead') h = '5200'; else return; }
-      else { const a = E.acct(l.acc); if (!a || a.type !== 'expense' || !a.nature || ['loss', 'cogs'].includes(a.nature)) return; h = l.acc; }
+      if (l.acc === '1310') {
+        if (l.head) h = l.head;
+        else if (l.cat === 'Material') h = '5000';
+        else if (l.cat === 'Labour') h = '5110';
+        else if (l.cat === 'Overhead') h = '5200';
+        else return;
+      } else {
+        const a = E.acct(l.acc);
+        if (!a || a.type !== 'expense' || !a.nature || ['loss', 'cogs', 'contra'].includes(a.nature) || a.code === '5390') return;
+        h = l.acc;
+      }
       const v = l.dr - l.cr;
       if (l.acc === '1310' && l.head === '5290') return;
       H[h] = (H[h] || 0) + v;

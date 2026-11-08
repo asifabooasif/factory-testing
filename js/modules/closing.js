@@ -1,13 +1,4 @@
-/* Month-end close checklist — every control total in one place:
-   sub-ledgers agree with the ledger, nothing is left half-done, then
-   lock the period so posted figures cannot change.
-
-   Payroll-related checks (V6 model):
-     • Piece wages (2210) from unpaid prodLogs
-     • All wage & salary runs paid (kind='run' + kind='daily-salary')
-     • Advance balances (1250) — reads via E.advBal() which correctly
-       handles both run lines and daily-salary recovery
-*/
+/* Month-end close checklist — every control total in one place */
 (E => {
   const ri = E.N.findIndex(n => n.id === 'health');
   E.N.splice(ri < 0 ? E.N.length : ri + 1, 0, { g: 'Reports', id: 'closing', ico: '🔒', label: 'Month-end Close' });
@@ -33,30 +24,37 @@
     /* 3. finished goods stock */
     add('Finished goods stock agrees with the ledger (1320)', fg === E.bal('1320', t), 'Stock records ' + E.m(fg) + ' · Ledger ' + E.m(E.bal('1320', t)), 'stock');
 
-    /* 4. WIP */
+    /* 4. WIP — FIXED: real comparison against open jobs */
     const act = E.rows('jobs').filter(j => j.status === 'In Progress');
-    const wipJ = E.rows('journalEntries').flatMap(j => j.lines.filter(l => l.acc === '1310')).reduce((s, l) => s + l.dr - l.cr, 0);
-    add('Work-in-progress (1310) is explained by open jobs', true, E.m(wipJ) + ' sits in ' + act.length + ' job(s) in progress', 'jobs');
+    const wipLedger = E.rows('journalEntries').flatMap(j => j.lines.filter(l => l.acc === '1310')).reduce((s, l) => s + l.dr - l.cr, 0);
+    let wipOpenJobs = 0;
+    act.forEach(j => {
+      E.rows('journalEntries').flatMap(jj => jj.lines).filter(l => l.job === j.id && l.acc === '1310').forEach(l => {
+        wipOpenJobs += l.dr - l.cr;
+      });
+    });
+    const wipDiff = wipLedger - wipOpenJobs;
+    add('Work-in-progress (1310) is explained by open jobs', Math.abs(wipDiff) <= 1,
+      'Ledger ' + E.m(wipLedger) + ' · Open jobs ' + E.m(wipOpenJobs) + (wipDiff ? ' · Differs by ' + E.m(wipDiff) : ''), 'jobs');
 
     /* 5. piece wages accrual */
     const piece = E.rows('prodLogs').filter(l => l.status === 'accrued').reduce((s, l) => s + l.amount, 0);
     add('Piece wages earned (2210) agree with unpaid production entries', piece === E.bal('2210', t), 'Production log ' + E.m(piece) + ' · Ledger ' + E.m(E.bal('2210', t)), 'wages');
 
-    /* 6. all runs paid — now includes daily-salary records */
-    const unp = E.rows('wageRuns').filter(r =>
-      !r.cancelled &&
-      (r.kind === 'run' || r.kind === 'daily-salary') &&
-      !r.paid
-    ).length;
-    add('All wage & salary runs are paid', !unp,
-      unp ? unp + ' run(s) unpaid — wages payable ' + E.m(E.bal('2200', t)) : 'Wages payable ' + E.m(E.bal('2200', t)),
-      'wages');
+    /* 6. all runs paid — includes daily-salary */
+    const unp = E.rows('wageRuns').filter(r => !r.cancelled && (r.kind === 'run' || r.kind === 'daily-salary') && !r.paid).length;
+    add('All wage & salary runs are paid', !unp, unp ? unp + ' run(s) unpaid — wages payable ' + E.m(E.bal('2200', t)) : 'Wages payable ' + E.m(E.bal('2200', t)), 'wages');
 
-    /* 7. staff advances */
-    const adv = E.rows('employees').reduce((s, e) => s + (E.advBal ? E.advBal(e.id) : 0), 0);
-    add('Staff advance balances agree with the ledger (1250)', adv === E.bal('1250', t), 'Staff balances ' + E.m(adv) + ' · Ledger ' + E.m(E.bal('1250', t)), 'advreg');
+    /* 7. staff advances — FIXED: includes staff loans */
+    const advAdvances = E.rows('employees').reduce((s, e) => s + (E.advBal ? E.advBal(e.id) : 0), 0);
+    const advLoans = E.rows('staffLoans')
+      .filter(l => !l.cancelled && !l.settled)
+      .reduce((s, l) => s + (E.staffLoanTotals ? E.staffLoanTotals(l).principalOut : 0), 0);
+    const advTotal = advAdvances + advLoans;
+    add('Staff advance + loan balances agree with the ledger (1250)', advTotal === E.bal('1250', t),
+      'Advances ' + E.m(advAdvances) + ' + Loans ' + E.m(advLoans) + ' = ' + E.m(advTotal) + ' · Ledger ' + E.m(E.bal('1250', t)), 'advreg');
 
-    /* 8. overhead pool */
+    /* 8. overhead pool — ignores 5390 */
     const un = E.unabsorbed ? E.unabsorbed() : 0;
     add('Factory overhead pool is absorbed into jobs', un <= 0, 'Not yet absorbed: ' + E.m(un), 'expenses');
 
@@ -93,7 +91,6 @@
     E.go();
     E.toast('Period locked until ' + d, 'success');
   };
-
   E.A.lkClear = async () => {
     if (!confirm('Unlock all periods?')) return;
     await E.setSetting({ lockedUntil: '' });
