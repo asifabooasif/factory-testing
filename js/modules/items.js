@@ -1,8 +1,7 @@
-/* PART 2 (v4) — Items with per-pair pricing + mixed BOM units + BULK BOM COPY.
+/* PART 2 (v5) — Items strictly PER PAIR.
    ─ price stored as cents PER PAIR
-   ─ sizeRun count = pairs per pack
-   ─ BOM qty has perUnit: 'pair' | 'pack'
-   ─ NEW: Bulk copy BOM to multiple articles at once
+   ─ BOM qty is strictly PER PAIR (fractional if needed for boxes/ropes)
+   ─ Bulk copy BOM included
 */
 (E => {
   const n = E.N.find(x => x.id === 'items'); if (n) n.soon = 0;
@@ -200,7 +199,7 @@
   };
 
   /* ═══════════════════════════════════════════════════════════
-     BOM MANAGEMENT WITH BULK COPY
+     BOM MANAGEMENT — STRICTLY PER PAIR
      ═══════════════════════════════════════════════════════════ */
   E.A.bomM = id => {
     const it = E.D.items.find(x => x.id === id);
@@ -209,10 +208,10 @@
     const materials = E.rows('items').filter(i => i.cat !== 'Finished Good').sort((a, b) => a.art.localeCompare(b.art));
 
     E.modal('BOM — ' + it.art + ' ' + it.name, `
-      <p class="muted" style="margin-bottom:14px">Define materials for ONE pair or ONE pack. This BOM is shared across all colours of this article.</p>
+      <p class="muted" style="margin-bottom:14px"><b style="color:var(--ac)">STRICTLY PER PAIR.</b> Define exactly how much material goes into ONE PAIR. (e.g., if a Box holds 6 pairs, enter 0.1667). This BOM is shared across all colours.</p>
       
       <div class="tw"><table>
-        <thead><tr><th>Material</th><th class="r">Qty</th><th>Per</th><th></th></tr></thead>
+        <thead><tr><th>Material</th><th class="r">Qty (per Pair)</th><th></th></tr></thead>
         <tbody id="bom_body">
           ${bom.length ? bom.map((b, i) => {
             const mat = E.D.items.find(x => x.id === b.itemId);
@@ -221,14 +220,10 @@
                 <option value="">— select material —</option>
                 ${materials.map(m => `<option value="${m.id}" ${b.itemId === m.id ? 'selected' : ''}>${E.esc(m.art)} — ${E.esc(m.name)}</option>`).join('')}
               </select></td>
-              <td class="r"><input class="bom-qty" type="number" step="0.0001" value="${b.qty || ''}" style="width:80px;padding:6px;text-align:right;border:1px solid var(--bd);border-radius:8px"></td>
-              <td><select class="bom-per" style="padding:6px;border:1px solid var(--bd);border-radius:8px">
-                <option value="pair" ${(b.perUnit || 'pair') === 'pair' ? 'selected' : ''}>per PAIR</option>
-                <option value="pack" ${b.perUnit === 'pack' ? 'selected' : ''}>per PACK</option>
-              </select></td>
+              <td class="r"><input class="bom-qty" type="number" step="0.0001" value="${b.qty || ''}" style="width:100px;padding:6px;text-align:right;border:1px solid var(--bd);border-radius:8px"></td>
               <td><button class="btn sm d" data-a="bomRm" data-id="${i}">✕</button></td>
             </tr>`;
-          }).join('') : '<tr><td colspan="4" class="muted" style="padding:14px;text-align:center">No materials yet. Click + Add below.</td></tr>'}
+          }).join('') : '<tr><td colspan="3" class="muted" style="padding:14px;text-align:center">No materials yet. Click + Add below.</td></tr>'}
         </tbody>
       </table></div>
       
@@ -255,11 +250,7 @@
         <option value="">— select material —</option>
         ${materials.map(m => `<option value="${m.id}">${E.esc(m.art)} — ${E.esc(m.name)}</option>`).join('')}
       </select></td>
-      <td class="r"><input class="bom-qty" type="number" step="0.0001" style="width:80px;padding:6px;text-align:right;border:1px solid var(--bd);border-radius:8px"></td>
-      <td><select class="bom-per" style="padding:6px;border:1px solid var(--bd);border-radius:8px">
-        <option value="pair">per PAIR</option>
-        <option value="pack">per PACK</option>
-      </select></td>
+      <td class="r"><input class="bom-qty" type="number" step="0.0001" style="width:100px;padding:6px;text-align:right;border:1px solid var(--bd);border-radius:8px"></td>
       <td><button class="btn sm d" data-a="bomRm" data-id="${idx}">✕</button></td>
     </tr>`);
   };
@@ -273,13 +264,12 @@
       document.querySelectorAll('#bom_body tr[data-bom]').forEach(tr => {
         const matId = tr.querySelector('.bom-mat').value;
         const qty = parseFloat(tr.querySelector('.bom-qty').value) || 0;
-        const perUnit = tr.querySelector('.bom-per').value;
-        if (matId && qty > 0) rows.push({ itemId: matId, variantId: '', qty, perUnit });
+        if (matId && qty > 0) rows.push({ itemId: matId, variantId: '', qty: qty }); /* perUnit is now removed/implicitly 'pair' */
       });
       it.bom = rows;
       await E.save('items', it, b);
       E.closeM(); E.go();
-      E.toast('BOM saved · ' + rows.length + ' material(s)', 'success');
+      E.toast('BOM saved · ' + rows.length + ' material(s) per pair', 'success');
     } catch (e) { E.toast(e.message, 'error'); }
   };
 
@@ -287,7 +277,6 @@
     const it = E.D.items.find(x => x.id === id);
     if (!it || !it.bom || !it.bom.length) return E.toast('Add materials to this BOM first', 'error');
     
-    // Get other Finished Goods
     const others = E.rows('items').filter(i => i.cat === 'Finished Good' && i.id !== id && i.active).sort((a, b) => a.art.localeCompare(b.art));
     if (!others.length) return E.toast('No other finished goods to copy to', 'error');
 
@@ -329,7 +318,6 @@
         const target = E.D.items.find(x => x.id === targetId);
         if (!target) continue;
         const b = JSON.parse(JSON.stringify(target));
-        // Deep copy the BOM array to avoid reference sharing
         target.bom = JSON.parse(JSON.stringify(from.bom || []));
         await E.save('items', target, b);
         copied++;
